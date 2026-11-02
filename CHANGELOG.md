@@ -2,9 +2,9 @@
 
 ## 0.4.0 — unreleased
 
-This revision targets Standard ABAP 7.40 SP08 or newer. It has local static and JavaScript-transpiled logic checks; it has not been activated or executed in SAP.
+This revision retains classic ABAP 7.00 syntax; actual 7.00 runtime/API support still requires SAP validation. It has local static and JavaScript-transpiled logic checks; it has not been activated or executed in SAP.
 
-- Replace the 7.00 compatibility style with modern ABAP expressions, inline declarations, explicit table keys and modern unit assertions.
+- Keep classic ABAP declarations, CREATE OBJECT, intermediate result variables, classic table/string statements and CL_AUNIT_ASSERT tests. Add an AST/token compatibility gate and 11 gate tests for newer syntax forms that the versioned parser can miss.
 - Require the custom `ZCHE_DUPL` authorization object before scanning or saving decisions. Check BP authorization groups before reading identifying details; separately require full-identifier and decision permissions.
 - Add a reference date, evaluated at midnight UTC, and filter valid roles, address assignments/records, communication and bank details. Apply country/role eligibility before detailed reads.
 - Require explicit opt-in for Turkish VKN/TCKN validation, disabled by default. Preserve letters in foreign tax identifiers during matching.

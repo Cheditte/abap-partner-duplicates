@@ -11,7 +11,7 @@ The script reads the current `src/zche_dupl_find.prog.abap`, extracts its shared
 - `LCL_APP` method `CHECK_SETTINGS`;
 - the report's `LTC_*` test classes and required forward declarations.
 
-SAP I/O methods are excluded. Simplified local character types stand in for BP identifiers, roles, groupings and tax categories. The library provides other standard types and `CL_ABAP_UNIT_ASSERT`. These fixtures are outside installable `src/` and must never be imported into SAP.
+SAP I/O methods are excluded. Simplified local character types stand in for BP identifiers, roles, groupings and tax categories. The library provides other standard types and `CL_ABAP_UNIT_ASSERT`; a harness-only `CL_AUNIT_ASSERT` alias inherits that implementation so the report can keep classic test syntax. These fixtures are outside installable `src/` and must never be imported into SAP.
 
 The transpiler and runtime are pinned to `2.14.15`; `open-abap/open-abap-core` is pinned to `f735eed652288c8ed85b3083a187cc3e7e4a9b97`. The script verifies the configured revision and the checkout revision reported by the transpiler. Git/network access is required for that public dependency.
 

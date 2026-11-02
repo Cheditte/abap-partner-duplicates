@@ -4,7 +4,7 @@
 
 Vergi numarası, IBAN, isim, adres, telefon ve e-posta üzerinden olası mükerrer SAP iş ortaklarını bulur. Her adayı bir puan ve gerekçeyle gösterir; kararı ana veri ekibi verir.
 
-**Ön sürüm v0.4.** On-premise/private sistemlerde standart ABAP içindir; hedef **7.40 SP08 ve üzeridir**. Değişen revizyon SAP'te aktifleştirilmedi veya çalıştırılmadı. Önceki v0.3 sürümünün Platform 2023 sonuçları bu değişiklikleri doğrulamaz. ABAP 7.00 desteği artık belirtilmiyor.
+**Ön sürüm v0.4.** On-premise/private sistemlerde klasik ABAP içindir; hedef **ABAP 7.00 sözdizimidir**. Değişen revizyon SAP'te aktifleştirilmedi veya çalıştırılmadı. Önceki v0.3 sürümünün Platform 2023 sonuçları bu değişiklikleri doğrulamaz. Gerçek bir 7.00 sistemindeki API ve çalışma zamanı uyumu henüz doğrulanmadı.
 
 ## Ne yapar?
 
@@ -20,11 +20,11 @@ Puan ayarlanabilir bir sezgisel ölçüdür; **iki kaydın aynı olmasının öl
 
 | Konu | Gereksinim |
 |---|---|
-| Sistem | BP tabloları olan Unicode SAP, standart ABAP 7.40 SP08+. Yalnız müşteri/tedarikçi tablolarını kullanan eski ECC sistemleri için kaynak sınıfı uyarlanmalıdır. |
+| Sistem | BP tabloları olan Unicode SAP, raporun gerektirdiği BP API’leri. Yalnız müşteri/tedarikçi tablolarını kullanan eski ECC sistemleri için kaynak sınıfı uyarlanmalıdır. |
 | Arayüz | Seçim ve karar tıklamaları için SAP GUI; arka planda spool ve job log'u. |
 | Kurulum | Raporu kuracak ABAP geliştiricisi ve aşağıdaki yetki nesnesini tanımlayıp atayacak yetki yöneticisi. |
 | Veri kapsamı | BP rolü, gruplama, ülke ve vergi kategorileri hedef sistemde doğrulanmalıdır. `TR2` yalnızca verilen örnek kategoridir. |
-| Uyumluluk | Statik 7.40 SP08/7.58 kontrolleri SAP API varlığını veya çalışma zamanı uyumunu kanıtlamaz. ABAP Cloud uygulaması değildir. |
+| Uyumluluk | Statik 7.00/7.58 kontrolleri SAP API varlığını veya çalışma zamanı uyumunu kanıtlamaz. ABAP Cloud uygulaması değildir. |
 
 ## Kurulum ve yetkilendirme
 
@@ -93,18 +93,21 @@ Node.js 22+, npm ve Git yalnız geliştirme içindir; raporun SAP'te çalışmas
 
 ```sh
 npm ci --ignore-scripts
+npm run test:gate
 npm run lint
 npm run test:logic
 ```
 
-`lint:740` ve `lint:758` hedefleri ayrı çalıştırır. Araç sürümleri sabittir. Depodaki `.abaplint-deps/` dosyaları sınırlı standart nesne yer tutucularıdır; SAP'ye kurulmaz ve bütün DDIC/sınıf/fonksiyon arayüzlerini doğrulayamaz.
+`lint:700` ve `lint:758` hedefleri ayrı çalıştırır. Araç sürümleri sabittir. Depodaki `.abaplint-deps/` dosyaları sınırlı standart nesne yer tutucularıdır; SAP'ye kurulmaz ve bütün DDIC/sınıf/fonksiyon arayüzlerini doğrulayamaz.
 
 Mantık test aracı güncel rapordaki saf metotları ve test sınıflarını çıkarıp JavaScript'e dönüştürür. Gerçek yetki, SQL seçimi, ALV, `INDX`, kilit veya commit çalıştırmaz. JavaScript sayısal davranışı SAP ile eşdeğerlik kanıtı değildir. Ayrıntılar: [tests/logic/README.md](tests/logic/README.md).
+
+`npm run check:classic`, `lint` içinde de çalışan ek proje kontrolüdür. Sabit sürümlü abaplint core ile raporu ayrıştırır; yorumları/metin örneklerini ayırarak inline tanım, constructor ifadesi, şablon, tablo ifadesi, `&&`, boş anahtar ve parametre içinde metot çağrısını reddeder. Diğer sözdizimi sürümlü abaplint kontrolündedir; bu kontrol bütün SAP API’lerinin 7.00'da varlığını kanıtlamaz. `test:gate`, kabul edilen klasik ifadeler ile reddedilecek örnekleri sınar.
 
 ## Doğrulama durumu
 
 Değişen kod iki statik hedefte sıfır bulguyla kontrol edildi ve **39 dönüştürülmüş mantık testinin tamamı** geçti. Bunlar SAP ABAP Unit sonucu değildir; gerçek yetki, kaynak SQL'i, karar kaydı veya GUI davranışını doğrulamaz.
 
-v0.3 README'si, 2 Kasım 2026'da ABAP Platform 2023 üzerinde 30 ABAP Unit testinin ve 21 uydurma cariyle arka plan çalışmasının geçtiğini bildirmişti. Bu geçmiş sonuçlar önceki koda aittir. Güncel modernizasyon, yetki ve geçerlilik değişiklikleri için yeni SAP aktivasyonu, ATC, bütün ABAP Unit testleri ve entegrasyon kabulü gerekir.
+v0.3 README'si, 2 Kasım 2026'da ABAP Platform 2023 üzerinde 30 ABAP Unit testinin ve 21 uydurma cariyle arka plan çalışmasının geçtiğini bildirmişti. Bu geçmiş sonuçlar önceki koda aittir. Güncel eşleştirme, yetki ve geçerlilik değişiklikleri için yeni SAP aktivasyonu, ATC, bütün ABAP Unit testleri ve entegrasyon kabulü gerekir.
 
 Gerekli kanıtlar için [CONTRIBUTING.md](CONTRIBUTING.md) dosyasına bakın. MIT lisansı: [LICENSE](LICENSE).

@@ -9,7 +9,7 @@
     }
   ],
   "syntax": {
-    "version": "v740sp08",
+    "version": "v700",
     "errorNamespace": "^(Z|Y|LCL_|LIF_|LTC_|LCX_)"
   },
   "rules": {
