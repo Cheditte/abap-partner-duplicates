@@ -4,7 +4,7 @@
 
 Find likely duplicate SAP business partners using tax numbers, IBANs, names, addresses, phones and e-mail addresses. Each candidate has a score and an explanation; the master-data team makes the decision.
 
-**Pre-release v0.4.** Standard ABAP for on-premise/private systems, targeting **7.40 SP08 or newer**. The changed revision has not been activated or executed in SAP. Historical Platform 2023 results from v0.3 do not validate these changes. ABAP 7.00 support is no longer claimed.
+**Pre-release v0.4.** Classic ABAP for on-premise/private systems, targeting **ABAP 7.00 syntax**. The changed revision has not been activated or executed in SAP. Historical Platform 2023 results from v0.3 do not validate these changes. Actual API and runtime compatibility on a real 7.00 system remains unverified.
 
 ## What it does
 
@@ -20,11 +20,11 @@ A score is a configurable heuristic, **not a measured probability** that two par
 
 | Area | Requirement |
 |---|---|
-| Runtime | Unicode SAP system with BP tables and Standard ABAP 7.40 SP08+; older ECC customer/vendor-only systems need a different source implementation. |
+| Runtime | Unicode SAP system with BP tables and the BP APIs required by the report; older ECC customer/vendor-only systems need a different source implementation. |
 | UI | SAP GUI for selection and ALV decision clicks; background execution produces spool/job-log output. |
 | Setup | An ABAP developer to install the report and an authorization administrator to define and assign the custom authorization object below. |
 | Data scope | Relevant BP roles, groupings, countries and tax categories must be checked in the target system. `TR2` is only the supplied example category. |
-| Compatibility | Static 7.40 SP08/7.58 checks do not establish SAP API availability or runtime compatibility. This is not ABAP Cloud code. |
+| Compatibility | Static 7.00/7.58 checks do not establish SAP API availability or runtime compatibility. This is not ABAP Cloud code. |
 
 ## Install and authorize
 
@@ -93,18 +93,21 @@ Node.js 22+, npm and Git are development tools only; they are not needed to exec
 
 ```sh
 npm ci --ignore-scripts
+npm run test:gate
 npm run lint
 npm run test:logic
 ```
 
-`lint:740` and `lint:758` run the static targets separately. Tool versions are pinned. The committed `.abaplint-deps/` files are limited standard-object stand-ins, not installable SAP source; they cannot validate every DDIC/class/function interface.
+`lint:700` and `lint:758` run the static targets separately. Tool versions are pinned. The committed `.abaplint-deps/` files are limited standard-object stand-ins, not installable SAP source; they cannot validate every DDIC/class/function interface.
 
 The logic harness extracts pure methods and existing test classes from the current report, then transpiles them to JavaScript. It does not exercise real authorization, SQL selection, ALV, `INDX`, locks or commits. JavaScript numeric behavior does not establish SAP runtime parity. See [tests/logic/README.md](tests/logic/README.md) for extraction and evidence details.
+
+`npm run check:classic` is an extra project gate, also run by `lint`. It parses the report with pinned abaplint core, ignores comments/quoted examples, and rejects inline declarations, constructor expressions, templates, table expressions, `&&`, empty keys and method calls nested in actual arguments. Versioned abaplint still checks the rest of the syntax; the gate does not certify SAP API availability on 7.00. `test:gate` tests accepted classic statements and rejected examples.
 
 ## Verification status
 
 Local checks for the changed code passed both static targets with zero findings and completed all **39 transpiled logic tests**. These are not SAP ABAP Unit results and do not validate authorization, source SQL, decision persistence or GUI behavior.
 
-The v0.3 README reported 30 passing SAP ABAP Unit tests and a background run with 21 invented partners on ABAP Platform 2023, on 2 November 2026. Those historical results belong to the earlier code. Current modernization, authorization and validity changes require fresh SAP activation, ATC, complete ABAP Unit and integration acceptance.
+The v0.3 README reported 30 passing SAP ABAP Unit tests and a background run with 21 invented partners on ABAP Platform 2023, on 2 November 2026. Those historical results belong to the earlier code. Current matching, authorization and validity changes require fresh SAP activation, ATC, complete ABAP Unit and integration acceptance.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for required evidence and [CHANGELOG.md](CHANGELOG.md) for migration notes. MIT licensed; see [LICENSE](LICENSE).

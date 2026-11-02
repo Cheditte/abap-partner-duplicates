@@ -8,15 +8,18 @@ Use Node.js 22+, npm and Git:
 
 ```sh
 npm ci --ignore-scripts
+npm run test:gate
 npm run lint
 npm run test:logic
 ```
 
-The npm manifest and lockfile pin abaplint `2.120.92` and transpiler/runtime `2.14.15`. The logic library revision is fixed in `tests/logic/abap_transpile.json`. `lint:740` and `lint:758` run individual targets; both configs should keep the same rules. Dependency stand-ins are versioned in `.abaplint-deps/` and are deliberately incomplete.
+The npm manifest and lockfile pin abaplint CLI/core `2.120.92` and transpiler/runtime `2.14.15`. The logic library revision is fixed in `tests/logic/abap_transpile.json`. `lint:700` and `lint:758` run individual targets; both configs should keep the same rules. Dependency stand-ins are versioned in `.abaplint-deps/` and are deliberately incomplete.
+
+The default lint command first runs `check:classic`. Its AST-based nested-call check supplements v700 parsing, which can miss method calls used directly as actual arguments. Token/AST checks also reject inline declarations, constructor expressions, string templates/chaining, table expressions and empty keys. Built-in function availability remains the versioned parser’s responsibility. `test:gate` tests rejection and false-positive cases; neither gate guarantees complete 7.00 runtime support.
 
 GitHub Actions runs the same checks with read-only repository permissions. Passing static checks and JavaScript-transpiled tests does not establish SAP activation, old-release compatibility, authorization enforcement, database selection or GUI behavior.
 
-When changing pure logic, add a regression with expected reasons and score, not just a row count. Include missing inputs, disabled rules, non-Turkish identifiers and crowded keys where relevant. Do not weaken authority checks or remove failure handling to make a test pass. Preserve 7.40 SP08 compatibility; do not introduce 7.50+ test seams or newer syntax without deliberately changing the supported baseline.
+When changing pure logic, add a regression with expected reasons and score, not just a row count. Include missing inputs, disabled rules, non-Turkish identifiers and crowded keys where relevant. Do not weaken authority checks or remove failure handling to make a test pass. Preserve classic ABAP 7.00 syntax: explicit declarations, intermediate result variables, CREATE OBJECT and classic string/table statements. Do not introduce inline declarations, constructor expressions, templates, table expressions, empty table keys or nested method-call arguments. Actual 7.00 runtime/API compatibility still requires SAP testing.
 
 ## SAP acceptance checks
 

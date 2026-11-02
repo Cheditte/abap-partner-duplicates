@@ -84,6 +84,9 @@ try {
   await writeFile(path.join(source, "zcl_dupl_harness.clas.abap"),
     "CLASS zcl_dupl_harness DEFINITION PUBLIC FINAL CREATE PUBLIC. ENDCLASS.\nCLASS zcl_dupl_harness IMPLEMENTATION. ENDCLASS.\n");
   await copyFile(path.join(root, "tests/logic/zcl_dupl_harness.clas.xml"), path.join(source, "zcl_dupl_harness.clas.xml"));
+  await writeFile(path.join(source, "cl_aunit_assert.clas.abap"),
+    "CLASS cl_aunit_assert DEFINITION PUBLIC INHERITING FROM cl_abap_unit_assert. ENDCLASS.\nCLASS cl_aunit_assert IMPLEMENTATION. ENDCLASS.\n");
+  await copyFile(path.join(root, "tests/logic/cl_aunit_assert.clas.xml"), path.join(source, "cl_aunit_assert.clas.xml"));
   const configuration = JSON.parse(await readFile(path.join(root, "tests/logic/abap_transpile.json"), "utf8"));
   if (configuration.libs?.[0]?.ref !== coreRevision) throw new Error("Unexpected library revision");
   await writeFile(path.join(stage, "abap_transpile.json"), JSON.stringify(configuration, null, 2));
