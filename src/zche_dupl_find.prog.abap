@@ -1,11 +1,11 @@
 *&---------------------------------------------------------------------*
 *& ZCHE_DUPL_FIND: find likely duplicate business partners
-*& abap-partner-duplicates 0.3.0, https://github.com/Cheditte/abap-partner-duplicates
+*& abap-partner-duplicates 0.4.0, https://github.com/Cheditte/abap-partner-duplicates
 *& MIT License, Copyright (c) 2026 Ali Emre Altuntas
 *&---------------------------------------------------------------------*
 *& Install: SE38, create executable program ZCHE_DUPL_FIND, paste this
-*& source, activate. Nothing else is needed: no tables, no text elements.
-*& Written in ABAP 7.00 syntax, so it also runs on older releases.
+*& source, activate. Configure authorization object ZCHE_DUPL before use.
+*& Requires standard ABAP 7.40 SP08 or newer; no custom data tables.
 *&
 *& Reads only; nothing is merged, blocked or deleted. Settings are on the
 *& selection screen; save them as a variant to reuse them or to run the
@@ -29,6 +29,8 @@ PARAMETERS p_role TYPE bu_partnerrole.
 PARAMETERS p_group TYPE bu_group.
 PARAMETERS p_cntry TYPE land1.
 PARAMETERS p_taxty TYPE bptaxtype DEFAULT 'TR2'.
+PARAMETERS p_keydt TYPE d DEFAULT sy-datum OBLIGATORY.
+PARAMETERS p_taxchk AS CHECKBOX.
 SELECTION-SCREEN END OF BLOCK b_read.
 
 SELECTION-SCREEN BEGIN OF BLOCK b_rule WITH FRAME TITLE t_rule.
@@ -55,7 +57,7 @@ SELECTION-SCREEN END OF BLOCK b_out.
 * Types and constants
 *----------------------------------------------------------------------*
 INTERFACE lif_dupl.
-  CONSTANTS version TYPE string VALUE `0.3.0`.
+  CONSTANTS version TYPE string VALUE `0.4.0`.
 
   TYPES ty_rule TYPE c LENGTH 10.
   TYPES ty_decision_code TYPE c LENGTH 1.
@@ -84,7 +86,7 @@ INTERFACE lif_dupl.
       invalid_tax_id TYPE ty_finding VALUE 'INVALID_TAX_ID',
     END OF finding.
 
-  TYPES ty_strings TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+  TYPES ty_strings TYPE STANDARD TABLE OF string WITH EMPTY KEY.
 
   TYPES:
     BEGIN OF ty_address,
@@ -94,7 +96,7 @@ INTERFACE lif_dupl.
       street    TYPE string,
       house_no  TYPE string,
     END OF ty_address,
-    ty_addresses TYPE STANDARD TABLE OF ty_address WITH DEFAULT KEY.
+    ty_addresses TYPE STANDARD TABLE OF ty_address WITH EMPTY KEY.
 
   " One partner as the source delivers it, before normalization
   TYPES:
@@ -107,7 +109,7 @@ INTERFACE lif_dupl.
       phones    TYPE ty_strings,
       emails    TYPE ty_strings,
     END OF ty_partner,
-    ty_partners TYPE STANDARD TABLE OF ty_partner WITH DEFAULT KEY.
+    ty_partners TYPE STANDARD TABLE OF ty_partner WITH EMPTY KEY.
 
   " WEIGHT: how sure this rule alone makes us (0 to 100, 0 = rule off)
   " MIN_SIMILARITY: only for NAME, the lowest similarity that counts
@@ -126,6 +128,8 @@ INTERFACE lif_dupl.
       bp_role    TYPE bu_partnerrole,
       bp_group   TYPE bu_group,
       country    TYPE land1,
+      key_date   TYPE d,
+      tax_check  TYPE abap_bool,
       rules      TYPE ty_rule_settings,
       threshold  TYPE i,
       max_block  TYPE i,
@@ -145,7 +149,7 @@ INTERFACE lif_dupl.
       reasons  TYPE string,
       decision TYPE ty_decision_code,
     END OF ty_line,
-    ty_lines TYPE STANDARD TABLE OF ty_line WITH DEFAULT KEY.
+    ty_lines TYPE STANDARD TABLE OF ty_line WITH EMPTY KEY.
 
   TYPES:
     BEGIN OF ty_result,
@@ -250,17 +254,12 @@ CLASS lcl_text IMPLEMENTATION.
 
 
   METHOD num.
-    DATA lv_text TYPE c LENGTH 12.
-    WRITE iv_number TO lv_text LEFT-JUSTIFIED NO-GROUPING.
-    rv_text = lv_text.
+    rv_text = |{ iv_number NUMBER = RAW }|.
   ENDMETHOD.
 
 
   METHOD add.
-    DATA ls_text TYPE rsseltexts.
-    ls_text-name = iv_name.
-    ls_text-kind = iv_kind.
-    ls_text-text = get( iv_en = iv_en iv_tr = iv_tr ).
+    DATA(ls_text) = VALUE rsseltexts( name = iv_name kind = iv_kind text = get( iv_en = iv_en iv_tr = iv_tr ) ).
     APPEND ls_text TO ct_texts.
   ENDMETHOD.
 
@@ -284,6 +283,10 @@ CLASS lcl_text IMPLEMENTATION.
                    iv_tr = 'Ülke (boş = tümü)' CHANGING ct_texts = lt_texts ).
     add( EXPORTING iv_name = 'P_TAXTY'  iv_kind = 'P' iv_en = 'Tax number category'
                    iv_tr = 'Vergi numarası kategorisi' CHANGING ct_texts = lt_texts ).
+    add( EXPORTING iv_name = 'P_KEYDT' iv_kind = 'P' iv_en = 'Master-data reference date'
+                   iv_tr = 'Ana veri referans tarihi' CHANGING ct_texts = lt_texts ).
+    add( EXPORTING iv_name = 'P_TAXCHK' iv_kind = 'P' iv_en = 'Check Turkish VKN/TCKN'
+                   iv_tr = 'Türk VKN/TCKN kontrolü' CHANGING ct_texts = lt_texts ).
     add( EXPORTING iv_name = 'P_WTAX'   iv_kind = 'P' iv_en = 'Weight: same tax number'
                    iv_tr = 'Ağırlık: aynı vergi no' CHANGING ct_texts = lt_texts ).
     add( EXPORTING iv_name = 'P_WIBAN'  iv_kind = 'P' iv_en = 'Weight: same IBAN'
@@ -318,9 +321,7 @@ CLASS lcl_text IMPLEMENTATION.
         program_not_found           = 1
         program_cannot_be_generated = 2
         OTHERS                      = 3.
-    IF sy-subrc <> 0.                                       "#EC NEEDED
-      " Without texts the screen still works; it shows the field names
-    ENDIF.
+    " Without texts the screen still works; it shows the field names.
   ENDMETHOD.
 
 ENDCLASS.
@@ -372,28 +373,21 @@ ENDCLASS.
 CLASS lcl_tax_id IMPLEMENTATION.
 
   METHOD check.
-    DATA lv_id TYPE string.
-    DATA lv_masked TYPE string.
-    DATA lv_len TYPE i.
-    DATA lv_count TYPE string.
-
-    lv_id = iv_tax_id.
-    CONDENSE lv_id.
-    lv_masked = mask( lv_id ).
-    lv_len = strlen( lv_id ).
+    DATA(lv_id) = condense( CONV string( iv_tax_id ) ).
+    DATA(lv_masked) = mask( lv_id ).
+    DATA(lv_len) = strlen( lv_id ).
     IF lv_id CN '0123456789'.
-      CONCATENATE `Tax number ` lv_masked ` contains other characters than digits` INTO rv_problem.
+      rv_problem = |Tax number { lv_masked } contains other characters than digits|.
     ELSEIF lv_len = 10.
       IF is_valid_vkn( lv_id ) = abap_false.
-        CONCATENATE `Tax number (VKN) ` lv_masked `: check digit is wrong` INTO rv_problem.
+        rv_problem = |Tax number (VKN) { lv_masked }: check digit is wrong|.
       ENDIF.
     ELSEIF lv_len = 11.
       IF is_valid_tckn( lv_id ) = abap_false.
-        CONCATENATE `Identity number (TCKN) ` lv_masked `: check digits are wrong` INTO rv_problem.
+        rv_problem = |Identity number (TCKN) { lv_masked }: check digits are wrong|.
       ENDIF.
     ELSE.
-      lv_count = lcl_text=>num( lv_len ).
-      CONCATENATE `Tax number ` lv_masked ` has ` lv_count ` digits; VKN has 10, TCKN 11` INTO rv_problem.
+      rv_problem = |Tax number { lv_masked } has { lv_len NUMBER = RAW } digits; VKN has 10, TCKN 11|.
     ENDIF.
   ENDMETHOD.
 
@@ -403,26 +397,25 @@ CLASS lcl_tax_id IMPLEMENTATION.
     " p = 9 when v <> 0 and p = 0; the 10th digit is (10 - sum mod 10) mod 10
     DATA lv_sum TYPE i.
     DATA lv_power TYPE i VALUE 1024.
-    DATA lv_i TYPE i.
+
     DATA lv_v TYPE i.
-    DATA lv_p TYPE i.
-    DATA lv_check TYPE i.
+
 
     rv_valid = abap_false.
     IF strlen( iv_vkn ) <> 10 OR iv_vkn CN '0123456789'.
       RETURN.
     ENDIF.
     DO 9 TIMES.
-      lv_i = sy-index - 1.
+      DATA(lv_i) = sy-index - 1.
       lv_power = lv_power DIV 2.
       lv_v = ( digit( iv_text = iv_vkn iv_position = lv_i ) + 9 - lv_i ) MOD 10.
-      lv_p = ( lv_v * lv_power ) MOD 9.
+      DATA(lv_p) = ( lv_v * lv_power ) MOD 9.
       IF lv_v <> 0 AND lv_p = 0.
         lv_p = 9.
       ENDIF.
       lv_sum = lv_sum + lv_p.
     ENDDO.
-    lv_check = ( 10 - lv_sum MOD 10 ) MOD 10.
+    DATA(lv_check) = ( 10 - lv_sum MOD 10 ) MOD 10.
     IF lv_check = digit( iv_text = iv_vkn iv_position = 9 ).
       rv_valid = abap_true.
     ENDIF.
@@ -434,16 +427,14 @@ CLASS lcl_tax_id IMPLEMENTATION.
     " 11th = (d1 + ... + d10) mod 10
     DATA lv_odd TYPE i.
     DATA lv_even TYPE i.
-    DATA lv_position TYPE i.
-    DATA lv_10th TYPE i.
-    DATA lv_11th TYPE i.
+
 
     rv_valid = abap_false.
     IF strlen( iv_tckn ) <> 11 OR iv_tckn CN '0123456789' OR iv_tckn(1) = '0'.
       RETURN.
     ENDIF.
     DO 9 TIMES.
-      lv_position = sy-index - 1.
+      DATA(lv_position) = sy-index - 1.
       IF sy-index MOD 2 = 1.
         lv_odd = lv_odd + digit( iv_text = iv_tckn iv_position = lv_position ).
       ELSE.
@@ -451,8 +442,8 @@ CLASS lcl_tax_id IMPLEMENTATION.
       ENDIF.
     ENDDO.
     " MOD in ABAP is never negative
-    lv_10th = ( 7 * lv_odd - lv_even ) MOD 10.
-    lv_11th = ( lv_odd + lv_even + lv_10th ) MOD 10.
+    DATA(lv_10th) = ( 7 * lv_odd - lv_even ) MOD 10.
+    DATA(lv_11th) = ( lv_odd + lv_even + lv_10th ) MOD 10.
     IF lv_10th = digit( iv_text = iv_tckn iv_position = 9 )
         AND lv_11th = digit( iv_text = iv_tckn iv_position = 10 ).
       rv_valid = abap_true.
@@ -461,32 +452,17 @@ CLASS lcl_tax_id IMPLEMENTATION.
 
 
   METHOD mask.
-    DATA lv_text TYPE string.
-    DATA lv_len TYPE i.
-    DATA lv_stars TYPE i.
-    DATA lv_last TYPE i.
-
-    lv_text = iv_tax_id.
-    lv_len = strlen( lv_text ).
-    IF lv_len <= 5.
-      lv_stars = lv_len.
-    ELSE.
-      rv_masked = lv_text(3).
-      lv_stars = lv_len - 5.
-    ENDIF.
-    DO lv_stars TIMES.
-      CONCATENATE rv_masked '*' INTO rv_masked.
-    ENDDO.
-    IF lv_len > 5.
-      lv_last = lv_len - 2.
-      CONCATENATE rv_masked lv_text+lv_last(2) INTO rv_masked.
-    ENDIF.
+    DATA(lv_text) = CONV string( iv_tax_id ).
+    DATA(lv_len) = strlen( lv_text ).
+    rv_masked = COND #( WHEN lv_len <= 5 THEN repeat( val = `*` occ = lv_len )
+                       ELSE substring( val = lv_text len = 3 )
+                         && repeat( val = `*` occ = lv_len - 5 )
+                         && substring( val = lv_text off = lv_len - 2 ) ).
   ENDMETHOD.
 
 
   METHOD digit.
-    DATA lv_text TYPE string.
-    lv_text = iv_text.
+    DATA(lv_text) = CONV string( iv_text ).
     rv_digit = lv_text+iv_position(1).
   ENDMETHOD.
 
@@ -556,6 +532,12 @@ CLASS lcl_normalizer DEFINITION FINAL.
       RETURNING
         value(rv_domain) TYPE string.
 
+    METHODS tax_key
+      IMPORTING
+        iv_tax_id     TYPE csequence
+      RETURNING
+        VALUE(rv_key) TYPE string.
+
     METHODS iban_key
       IMPORTING
         iv_iban       TYPE csequence
@@ -578,17 +560,13 @@ ENDCLASS.
 CLASS lcl_normalizer IMPLEMENTATION.
 
   METHOD constructor.
-    DATA lt_words TYPE lif_dupl=>ty_strings.
-    DATA lt_parts TYPE lif_dupl=>ty_strings.
-    DATA lv_word TYPE string.
-    DATA lv_part TYPE string.
-
-    lt_words = default_words( ).
+    DATA(lt_words) = default_words( ).
     APPEND LINES OF it_extra_words TO lt_words.
-    LOOP AT lt_words INTO lv_word.
-      lv_word = simplify( lv_word ).
-      SPLIT lv_word AT space INTO TABLE lt_parts.
-      LOOP AT lt_parts INTO lv_part WHERE table_line IS NOT INITIAL.
+    LOOP AT lt_words INTO DATA(lv_word).
+      DATA(lv_simple) = simplify( lv_word ).
+      DATA lt_parts TYPE lif_dupl=>ty_strings.
+      SPLIT lv_simple AT space INTO TABLE lt_parts.
+      LOOP AT lt_parts INTO DATA(lv_part) WHERE table_line IS NOT INITIAL.
         INSERT lv_part INTO TABLE mt_stop_words.
       ENDLOOP.
     ENDLOOP.
@@ -596,107 +574,75 @@ CLASS lcl_normalizer IMPLEMENTATION.
 
 
   METHOD simplify.
-    " Long enough for any name or address line; longer input is cut
-    DATA lv_buffer TYPE c LENGTH 1000.
-    DATA lv_text TYPE string.
-    DATA lv_len TYPE i.
-    DATA lv_offset TYPE i.
-
-    lv_text = iv_text.
+    DATA(lv_text) = CONV string( iv_text ).
     TRANSLATE lv_text USING turkish_letters.
-    TRANSLATE lv_text TO UPPER CASE.
+    lv_text = to_upper( lv_text ).
+    DATA lv_buffer TYPE c LENGTH 1000.
     lv_buffer = lv_text.
-    lv_len = strlen( lv_buffer ).
-    DO lv_len TIMES.
-      lv_offset = sy-index - 1.
+    DO strlen( lv_buffer ) TIMES.
+      DATA(lv_offset) = sy-index - 1.
       IF lv_buffer+lv_offset(1) CN sy-abcde AND lv_buffer+lv_offset(1) CN '0123456789'.
         lv_buffer+lv_offset(1) = space.
       ENDIF.
     ENDDO.
-    CONDENSE lv_buffer.
-    rv_text = lv_buffer.
+    rv_text = condense( CONV string( lv_buffer ) ).
   ENDMETHOD.
 
 
   METHOD name_tokens.
+    DATA(lv_simple) = simplify( iv_name ).
     DATA lt_words TYPE lif_dupl=>ty_strings.
-    DATA lv_word TYPE string.
-    DATA lv_simple TYPE string.
-
-    lv_simple = simplify( iv_name ).
     SPLIT lv_simple AT space INTO TABLE lt_words.
-    LOOP AT lt_words INTO lv_word.
-      IF strlen( lv_word ) > 1.
-        READ TABLE mt_stop_words WITH TABLE KEY table_line = lv_word TRANSPORTING NO FIELDS.
-        IF sy-subrc <> 0.
-          APPEND lv_word TO rt_tokens.
-        ENDIF.
+    LOOP AT lt_words INTO DATA(lv_word).
+      IF strlen( lv_word ) > 1 AND NOT line_exists( mt_stop_words[ table_line = lv_word ] ).
+        APPEND lv_word TO rt_tokens.
       ENDIF.
     ENDLOOP.
     SORT rt_tokens BY table_line.
-    DELETE ADJACENT DUPLICATES FROM rt_tokens COMPARING table_line.
+    DELETE ADJACENT DUPLICATES FROM rt_tokens COMPARING ALL FIELDS.
   ENDMETHOD.
 
 
   METHOD default_words.
-    DATA lv_words TYPE string.
-    CONCATENATE `AS ANONIM SIRKETI SIRKET LTD STI LIMITED SAN SANAYI TIC TICARET VE ITH IHR`
-                ` ITHALAT IHRACAT PAZ PAZARLAMA INS INSAAT TAAH TAAHHUT KOLL KOM KOMANDIT`
-                ` KOOP KOOPERATIFI DIS IC INC CORP CO COMPANY LLC PLC GMBH AG SA`
-           INTO lv_words.
+    DATA(lv_words) = `AS ANONIM SIRKETI SIRKET LTD STI LIMITED SAN SANAYI TIC TICARET VE ITH IHR`
+                 && ` ITHALAT IHRACAT PAZ PAZARLAMA INS INSAAT TAAH TAAHHUT KOLL KOM KOMANDIT`
+                 && ` KOOP KOOPERATIFI DIS IC INC CORP CO COMPANY LLC PLC GMBH AG SA`.
     SPLIT lv_words AT space INTO TABLE rt_words.
   ENDMETHOD.
 
 
   METHOD free_mail_domains.
-    DATA lv_domains TYPE string.
-    CONCATENATE `gmail.com hotmail.com hotmail.com.tr outlook.com outlook.com.tr live.com msn.com`
-                ` yahoo.com yahoo.com.tr yandex.com yandex.com.tr icloud.com me.com mynet.com`
-                ` windowslive.com gmx.de web.de proton.me protonmail.com`
-           INTO lv_domains.
+    DATA(lv_domains) = `gmail.com hotmail.com hotmail.com.tr outlook.com outlook.com.tr live.com msn.com`
+                   && ` yahoo.com yahoo.com.tr yandex.com yandex.com.tr icloud.com me.com mynet.com`
+                   && ` windowslive.com gmx.de web.de proton.me protonmail.com`.
     SPLIT lv_domains AT space INTO TABLE rt_domains.
   ENDMETHOD.
 
 
   METHOD digits.
-    DATA lv_text TYPE string.
-    DATA lv_len TYPE i.
-    DATA lv_offset TYPE i.
-
-    lv_text = iv_text.
-    lv_len = strlen( lv_text ).
-    DO lv_len TIMES.
-      lv_offset = sy-index - 1.
+    DATA(lv_text) = CONV string( iv_text ).
+    DO strlen( lv_text ) TIMES.
+      DATA(lv_offset) = sy-index - 1.
       IF lv_text+lv_offset(1) CO '0123456789'.
-        CONCATENATE rv_digits lv_text+lv_offset(1) INTO rv_digits.
+        rv_digits = rv_digits && lv_text+lv_offset(1).
       ENDIF.
     ENDDO.
   ENDMETHOD.
 
 
   METHOD phone_key.
-    DATA lv_digits TYPE string.
-    DATA lv_len TYPE i.
-    DATA lv_offset TYPE i.
-
-    lv_digits = digits( iv_phone ).
-    lv_len = strlen( lv_digits ).
+    DATA(lv_digits) = digits( iv_phone ).
+    DATA(lv_len) = strlen( lv_digits ).
     IF lv_len < 7.
       RETURN.
     ENDIF.
-    IF lv_len > 10.
-      lv_offset = lv_len - 10.
-      rv_key = lv_digits+lv_offset.
-    ELSE.
-      rv_key = lv_digits.
-    ENDIF.
+    DATA(lv_offset) = nmax( val1 = 0 val2 = lv_len - 10 ).
+    rv_key = lv_digits+lv_offset.
   ENDMETHOD.
 
 
   METHOD email_key.
-    rv_key = iv_email.
-    CONDENSE rv_key.
-    TRANSLATE rv_key TO LOWER CASE.
+    rv_key = to_lower( condense( CONV string( iv_email ) ) ).
     IF rv_key NS '@'.
       CLEAR rv_key.
     ENDIF.
@@ -704,74 +650,63 @@ CLASS lcl_normalizer IMPLEMENTATION.
 
 
   METHOD email_domain.
-    DATA lv_email TYPE string.
-    DATA lv_local TYPE string.
-    DATA lt_public TYPE lif_dupl=>ty_strings.
-
-    lv_email = email_key( iv_email ).
+    DATA(lv_email) = email_key( iv_email ).
     IF lv_email IS INITIAL.
       RETURN.
     ENDIF.
+    DATA lv_local TYPE string.
     SPLIT lv_email AT '@' INTO lv_local rv_domain.
     IF rv_domain IS INITIAL.
       RETURN.
     ENDIF.
-    lt_public = free_mail_domains( ).
-    READ TABLE lt_public WITH KEY table_line = rv_domain TRANSPORTING NO FIELDS.
-    IF sy-subrc = 0.
+    DATA(lt_public) = free_mail_domains( ).
+    IF line_exists( lt_public[ table_line = rv_domain ] ).
       CLEAR rv_domain.
     ENDIF.
   ENDMETHOD.
 
 
   METHOD iban_key.
-    rv_key = iv_iban.
+    rv_key = to_upper( CONV string( iv_iban ) ).
     CONDENSE rv_key NO-GAPS.
-    TRANSLATE rv_key TO UPPER CASE.
   ENDMETHOD.
 
 
   METHOD address_key.
-    " CADDESI, CADDE, CAD and CD are the same street word; so are SOKAK/SOKAGI/SOK/SK, ...
-    DATA lt_words TYPE lif_dupl=>ty_strings.
-    DATA lv_word TYPE string.
-    DATA lv_street TYPE string.
-    DATA lv_place TYPE string.
-    DATA lv_text TYPE string.
-
-    CONCATENATE is_address-street is_address-house_no INTO lv_text SEPARATED BY space.
+    DATA(lv_street_text) = simplify( is_address-street ).
+    IF lv_street_text IS INITIAL.
+      RETURN.
+    ENDIF.
+    DATA(lv_text) = |{ lv_street_text } { is_address-house_no }|.
     lv_text = simplify( lv_text ).
+    DATA lt_words TYPE lif_dupl=>ty_strings.
     SPLIT lv_text AT space INTO TABLE lt_words.
-    LOOP AT lt_words INTO lv_word.
-      CASE lv_word.
-        WHEN `CADDESI` OR `CADDE` OR `CAD`.
-          lv_word = `CD`.
-        WHEN `SOKAK` OR `SOKAGI` OR `SOK`.
-          lv_word = `SK`.
-        WHEN `MAHALLESI` OR `MAHALLE` OR `MAH`.
-          lv_word = `MH`.
-        WHEN `BULVARI` OR `BULVAR` OR `BUL`.
-          lv_word = `BLV`.
-        WHEN `NO` OR `NUMARA`.
-          CLEAR lv_word.
-      ENDCASE.
-      IF lv_word IS INITIAL.
-        CONTINUE.
-      ENDIF.
-      IF lv_street IS INITIAL.
-        lv_street = lv_word.
-      ELSE.
-        CONCATENATE lv_street lv_word INTO lv_street SEPARATED BY space.
+    DATA lv_street TYPE string.
+    LOOP AT lt_words INTO DATA(lv_word).
+      lv_word = SWITCH #( lv_word
+        WHEN `CADDESI` OR `CADDE` OR `CAD` THEN `CD`
+        WHEN `SOKAK` OR `SOKAGI` OR `SOK` THEN `SK`
+        WHEN `MAHALLESI` OR `MAHALLE` OR `MAH` THEN `MH`
+        WHEN `BULVARI` OR `BULVAR` OR `BUL` THEN `BLV`
+        WHEN `NO` OR `NUMARA` THEN ``
+        ELSE lv_word ).
+      IF lv_word IS NOT INITIAL.
+        lv_street = COND #( WHEN lv_street IS INITIAL THEN lv_word ELSE |{ lv_street } { lv_word }| ).
       ENDIF.
     ENDLOOP.
     IF lv_street IS INITIAL.
       RETURN.
     ENDIF.
-    lv_place = simplify( is_address-post_code ).
+    DATA(lv_place) = simplify( is_address-post_code ).
     IF lv_place IS INITIAL.
       lv_place = simplify( is_address-city ).
     ENDIF.
-    CONCATENATE is_address-country '/' lv_place '/' lv_street INTO rv_key.
+    rv_key = |{ is_address-country }/{ lv_place }/{ lv_street }|.
+  ENDMETHOD.
+
+  METHOD tax_key.
+    rv_key = simplify( iv_tax_id ).
+    CONDENSE rv_key NO-GAPS.
   ENDMETHOD.
 
 ENDCLASS.
@@ -791,7 +726,8 @@ ENDCLASS.
 * MAX_BLOCK partners is skipped and reported, so one common word cannot
 * make the run compare everybody with everybody.
 *----------------------------------------------------------------------*
-CLASS lcl_matcher DEFINITION FINAL.
+CLASS ltc_matcher DEFINITION DEFERRED.
+CLASS lcl_matcher DEFINITION FINAL FRIENDS ltc_matcher.
   PUBLIC SECTION.
     CONSTANTS default_threshold TYPE i VALUE 60.
     CONSTANTS default_max_block TYPE i VALUE 200.
@@ -844,13 +780,15 @@ CLASS lcl_matcher DEFINITION FINAL.
         emails    TYPE lif_dupl=>ty_strings,
         domains   TYPE lif_dupl=>ty_strings,
       END OF ty_prepared,
-      ty_prepared_tab TYPE STANDARD TABLE OF ty_prepared WITH DEFAULT KEY.
+      ty_prepared_tab TYPE STANDARD TABLE OF ty_prepared WITH EMPTY KEY.
 
-    TYPES ty_indexes TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    TYPES ty_indexes TYPE STANDARD TABLE OF i WITH EMPTY KEY.
     TYPES:
       BEGIN OF ty_block,
         key     TYPE string,
-        members TYPE ty_indexes,
+        members      TYPE ty_indexes,
+        member_count TYPE i,
+        last_index   TYPE i,
       END OF ty_block,
       ty_blocks TYPE HASHED TABLE OF ty_block WITH UNIQUE KEY key.
 
@@ -926,52 +864,19 @@ ENDCLASS.
 CLASS lcl_matcher IMPLEMENTATION.
 
   METHOD default_rules.
-    DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
-
-    ls_rule-rule = lif_dupl=>rule-tax_id.
-    ls_rule-weight = 95.
-    INSERT ls_rule INTO TABLE rt_rules.
-    ls_rule-rule = lif_dupl=>rule-iban.
-    ls_rule-weight = 90.
-    INSERT ls_rule INTO TABLE rt_rules.
-    ls_rule-rule = lif_dupl=>rule-name.
-    ls_rule-weight = 70.
-    ls_rule-min_similarity = 85.
-    INSERT ls_rule INTO TABLE rt_rules.
-    CLEAR ls_rule-min_similarity.
-    ls_rule-rule = lif_dupl=>rule-address.
-    ls_rule-weight = 50.
-    INSERT ls_rule INTO TABLE rt_rules.
-    ls_rule-rule = lif_dupl=>rule-phone.
-    ls_rule-weight = 40.
-    INSERT ls_rule INTO TABLE rt_rules.
-    ls_rule-rule = lif_dupl=>rule-email.
-    ls_rule-weight = 40.
-    INSERT ls_rule INTO TABLE rt_rules.
+    rt_rules = VALUE #(
+      ( rule = lif_dupl=>rule-tax_id  weight = 95 )
+      ( rule = lif_dupl=>rule-iban    weight = 90 )
+      ( rule = lif_dupl=>rule-name    weight = 70 min_similarity = 85 )
+      ( rule = lif_dupl=>rule-address weight = 50 )
+      ( rule = lif_dupl=>rule-phone   weight = 40 )
+      ( rule = lif_dupl=>rule-email   weight = 40 ) ).
   ENDMETHOD.
 
 
   METHOD edit_distance.
-    " Two rows of the classic table: the previous and the current letter of text 1
-    DATA lt_previous TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
-    DATA lt_current TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
-    DATA lv_len1 TYPE i.
-    DATA lv_len2 TYPE i.
-    DATA lv_i TYPE i.
-    DATA lv_j TYPE i.
-    DATA lv_offset1 TYPE i.
-    DATA lv_offset2 TYPE i.
-    DATA lv_cost TYPE i.
-    DATA lv_value TYPE i.
-    DATA lv_best TYPE i.
-    DATA lv_left TYPE i.
-    DATA lv_up TYPE i.
-    DATA lv_diagonal TYPE i.
-    DATA lv_columns TYPE i.
-    DATA lv_up_index TYPE i.
-
-    lv_len1 = strlen( iv_text1 ).
-    lv_len2 = strlen( iv_text2 ).
+    DATA(lv_len1) = strlen( iv_text1 ).
+    DATA(lv_len2) = strlen( iv_text2 ).
     IF lv_len1 = 0.
       rv_distance = lv_len2.
       RETURN.
@@ -980,64 +885,41 @@ CLASS lcl_matcher IMPLEMENTATION.
       rv_distance = lv_len1.
       RETURN.
     ENDIF.
-
-    " Row 0: turning nothing into the first j letters of text 2 takes j steps
-    lv_columns = lv_len2 + 1.
+    DATA(lv_columns) = lv_len2 + 1.
+    DATA lt_previous TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lt_current TYPE STANDARD TABLE OF i WITH EMPTY KEY.
     DO lv_columns TIMES.
-      lv_value = sy-index - 1.
-      APPEND lv_value TO lt_previous.
+      APPEND CONV i( sy-index - 1 ) TO lt_previous.
     ENDDO.
-
-    lv_i = 0.
-    WHILE lv_i < lv_len1.
-      lv_i = lv_i + 1.
-      lv_offset1 = lv_i - 1.
-      CLEAR lt_current.
-      APPEND lv_i TO lt_current.
-      lv_j = 0.
-      WHILE lv_j < lv_len2.
-        lv_j = lv_j + 1.
-        lv_offset2 = lv_j - 1.
-        IF iv_text1+lv_offset1(1) = iv_text2+lv_offset2(1).
-          lv_cost = 0.
-        ELSE.
-          lv_cost = 1.
-        ENDIF.
-        " Table index = column + 1
-        lv_up_index = lv_j + 1.
-        READ TABLE lt_current INDEX lv_j INTO lv_left.
-        READ TABLE lt_previous INDEX lv_up_index INTO lv_up.
-        READ TABLE lt_previous INDEX lv_j INTO lv_diagonal.
-        lv_best = lv_left + 1.
-        IF lv_up + 1 < lv_best.
-          lv_best = lv_up + 1.
-        ENDIF.
-        IF lv_diagonal + lv_cost < lv_best.
-          lv_best = lv_diagonal + lv_cost.
-        ENDIF.
+    DO lv_len1 TIMES.
+      DATA(lv_i) = sy-index.
+      DATA(lv_offset1) = lv_i - 1.
+      lt_current = VALUE #( ( lv_i ) ).
+      DO lv_len2 TIMES.
+        DATA(lv_j) = sy-index.
+        DATA(lv_offset2) = lv_j - 1.
+        DATA(lv_cost) = COND i( WHEN iv_text1+lv_offset1(1) = iv_text2+lv_offset2(1) THEN 0 ELSE 1 ).
+        DATA(lv_left) = lt_current[ lv_j ].
+        DATA(lv_up) = lt_previous[ lv_j + 1 ].
+        DATA(lv_diagonal) = lt_previous[ lv_j ].
+        DATA(lv_best) = nmin( val1 = lv_left + 1 val2 = lv_up + 1 val3 = lv_diagonal + lv_cost ).
         APPEND lv_best TO lt_current.
-      ENDWHILE.
+      ENDDO.
       lt_previous = lt_current.
-    ENDWHILE.
-    READ TABLE lt_previous INDEX lv_columns INTO rv_distance.
+    ENDDO.
+    rv_distance = lt_previous[ lv_columns ].
   ENDMETHOD.
 
 
   METHOD constructor.
-    DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
-
     mt_rules = default_rules( ).
-    LOOP AT it_rules INTO ls_rule.
+    LOOP AT it_rules INTO DATA(ls_rule).
       MODIFY TABLE mt_rules FROM ls_rule.
       IF sy-subrc <> 0.
         INSERT ls_rule INTO TABLE mt_rules.
       ENDIF.
     ENDLOOP.
-    IF io_normalizer IS BOUND.
-      mo_normalizer = io_normalizer.
-    ELSE.
-      CREATE OBJECT mo_normalizer.
-    ENDIF.
+    mo_normalizer = COND #( WHEN io_normalizer IS BOUND THEN io_normalizer ELSE NEW lcl_normalizer( ) ).
     mv_threshold = iv_threshold.
     mv_max_block = iv_max_block.
     mv_unmask = iv_unmask.
@@ -1046,59 +928,35 @@ CLASS lcl_matcher IMPLEMENTATION.
 
   METHOD find.
     DATA lt_prepared TYPE ty_prepared_tab.
-    DATA ls_prepared TYPE ty_prepared.
-    DATA ls_other TYPE ty_prepared.
     DATA lt_blocks TYPE ty_blocks.
-    DATA ls_block TYPE ty_block.
     DATA lt_candidates TYPE ty_candidates.
-    DATA ls_candidate TYPE ty_candidate.
-    DATA ls_partner TYPE lif_dupl=>ty_partner.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-    DATA lv_index TYPE i.
-    DATA lv_index1 TYPE i.
-    DATA lv_index2 TYPE i.
-    DATA lv_count TYPE i.
-    DATA lv_from TYPE i.
-    DATA lv_text TYPE string.
-
     rs_result-partners = lines( it_partners ).
-    LOOP AT it_partners INTO ls_partner.
-      ls_prepared = prepare( ls_partner ).
+    LOOP AT it_partners INTO DATA(ls_partner).
+      DATA(ls_prepared) = prepare( ls_partner ).
       APPEND ls_prepared TO lt_prepared.
-      lv_index = sy-tabix.
+      DATA(lv_index) = sy-tabix.
       add_keys( EXPORTING is_prepared = ls_prepared iv_index = lv_index
-                CHANGING  ct_blocks   = lt_blocks ).
+                CHANGING ct_blocks = lt_blocks ).
     ENDLOOP.
-
-    LOOP AT lt_blocks INTO ls_block.
-      lv_count = lines( ls_block-members ).
-      IF lv_count < 2.
+    LOOP AT lt_blocks INTO DATA(ls_block).
+      IF ls_block-member_count < 2.
         CONTINUE.
       ENDIF.
-      IF lv_count > mv_max_block.
-        lv_text = describe_key( iv_key = ls_block-key iv_count = lv_count ).
-        APPEND lv_text TO rs_result-skipped_blocks.
+      IF ls_block-member_count > mv_max_block.
+        APPEND describe_key( iv_key = ls_block-key iv_count = ls_block-member_count ) TO rs_result-skipped_blocks.
         CONTINUE.
       ENDIF.
-      LOOP AT ls_block-members INTO lv_index1.
-        lv_from = sy-tabix + 1.
-        LOOP AT ls_block-members INTO lv_index2 FROM lv_from.
-          IF lv_index1 < lv_index2.
-            ls_candidate-index1 = lv_index1.
-            ls_candidate-index2 = lv_index2.
-          ELSE.
-            ls_candidate-index1 = lv_index2.
-            ls_candidate-index2 = lv_index1.
-          ENDIF.
-          INSERT ls_candidate INTO TABLE lt_candidates.
+      LOOP AT ls_block-members INTO DATA(lv_index1).
+        DATA(lv_from) = sy-tabix + 1.
+        LOOP AT ls_block-members INTO DATA(lv_index2) FROM lv_from.
+          INSERT VALUE #( index1 = nmin( val1 = lv_index1 val2 = lv_index2 )
+                          index2 = nmax( val1 = lv_index1 val2 = lv_index2 ) ) INTO TABLE lt_candidates.
         ENDLOOP.
       ENDLOOP.
     ENDLOOP.
-
-    LOOP AT lt_candidates INTO ls_candidate.
-      READ TABLE lt_prepared INDEX ls_candidate-index1 INTO ls_prepared.
-      READ TABLE lt_prepared INDEX ls_candidate-index2 INTO ls_other.
-      ls_line = score( is_one = ls_prepared is_other = ls_other ).
+    LOOP AT lt_candidates INTO DATA(ls_candidate).
+      DATA(ls_line) = score( is_one = lt_prepared[ ls_candidate-index1 ]
+                             is_other = lt_prepared[ ls_candidate-index2 ] ).
       IF ls_line-score >= mv_threshold AND ls_line-score > 0.
         APPEND ls_line TO rs_result-lines.
       ENDIF.
@@ -1109,64 +967,36 @@ CLASS lcl_matcher IMPLEMENTATION.
 
 
   METHOD similarity.
-    DATA lv_text1 TYPE string.
-    DATA lv_text2 TYPE string.
-    DATA lv_longer TYPE i.
-    DATA lv_by_edits TYPE i.
-    DATA lv_distance TYPE i.
-    DATA lv_by_words TYPE i.
-    DATA lv_shared TYPE i.
-    DATA lv_all TYPE i.
-    DATA lv_token TYPE string.
-
     IF it_tokens1 IS INITIAL OR it_tokens2 IS INITIAL.
       RETURN.
     ENDIF.
-    CONCATENATE LINES OF it_tokens1 INTO lv_text1 SEPARATED BY space.
-    CONCATENATE LINES OF it_tokens2 INTO lv_text2 SEPARATED BY space.
+    DATA(lv_text1) = concat_lines_of( table = it_tokens1 sep = space ).
+    DATA(lv_text2) = concat_lines_of( table = it_tokens2 sep = space ).
     IF lv_text1 = lv_text2.
       rv_percent = 100.
       RETURN.
     ENDIF.
-
-    lv_longer = strlen( lv_text1 ).
-    IF strlen( lv_text2 ) > lv_longer.
-      lv_longer = strlen( lv_text2 ).
-    ENDIF.
-    lv_distance = edit_distance( iv_text1 = lv_text1 iv_text2 = lv_text2 ).
-    lv_by_edits = 100 - 100 * lv_distance / lv_longer.
-
-    LOOP AT it_tokens1 INTO lv_token WHERE table_line IS NOT INITIAL.
-      READ TABLE it_tokens2 WITH KEY table_line = lv_token TRANSPORTING NO FIELDS.
-      IF sy-subrc = 0.
+    DATA(lv_longer) = nmax( val1 = strlen( lv_text1 ) val2 = strlen( lv_text2 ) ).
+    DATA(lv_distance) = edit_distance( iv_text1 = lv_text1 iv_text2 = lv_text2 ).
+    DATA(lv_by_edits) = CONV i( 100 - 100 * CONV decfloat34( lv_distance ) / lv_longer ).
+    DATA(lv_shared) = 0.
+    LOOP AT it_tokens1 INTO DATA(lv_token) WHERE table_line IS NOT INITIAL.
+      IF line_exists( it_tokens2[ table_line = lv_token ] ).
         lv_shared = lv_shared + 1.
       ENDIF.
     ENDLOOP.
-    lv_all = lines( it_tokens1 ) + lines( it_tokens2 ) - lv_shared.
-    lv_by_words = 100 * lv_shared / lv_all.
-
-    rv_percent = lv_by_edits.
-    IF lv_by_words > rv_percent.
-      rv_percent = lv_by_words.
-    ENDIF.
-    " Different names must not reach 100 by rounding
-    IF rv_percent >= 100.
-      rv_percent = 99.
-    ENDIF.
+    DATA(lv_all) = lines( it_tokens1 ) + lines( it_tokens2 ) - lv_shared.
+    DATA(lv_by_words) = CONV i( 100 * CONV decfloat34( lv_shared ) / lv_all ).
+    rv_percent = nmin( val1 = 99 val2 = nmax( val1 = lv_by_edits val2 = lv_by_words ) ).
   ENDMETHOD.
 
 
   METHOD prepare.
-    DATA lv_value TYPE string.
-    DATA lv_key TYPE string.
-    DATA ls_address TYPE lif_dupl=>ty_address.
-
     rs_prepared-partner = is_partner-partner.
     rs_prepared-name = is_partner-name.
     rs_prepared-tokens = mo_normalizer->name_tokens( is_partner-name ).
-
-    LOOP AT is_partner-tax_ids INTO lv_value.
-      lv_key = mo_normalizer->digits( lv_value ).
+    LOOP AT is_partner-tax_ids INTO DATA(lv_value).
+      DATA(lv_key) = mo_normalizer->tax_key( lv_value ).
       IF lv_key IS NOT INITIAL.
         APPEND lv_key TO rs_prepared-tax_ids.
       ENDIF.
@@ -1177,7 +1007,7 @@ CLASS lcl_matcher IMPLEMENTATION.
         APPEND lv_key TO rs_prepared-ibans.
       ENDIF.
     ENDLOOP.
-    LOOP AT is_partner-addresses INTO ls_address.
+    LOOP AT is_partner-addresses INTO DATA(ls_address).
       lv_key = mo_normalizer->address_key( ls_address ).
       IF lv_key IS NOT INITIAL.
         APPEND lv_key TO rs_prepared-addresses.
@@ -1202,22 +1032,18 @@ CLASS lcl_matcher IMPLEMENTATION.
     SORT: rs_prepared-tax_ids BY table_line, rs_prepared-ibans BY table_line,
           rs_prepared-addresses BY table_line, rs_prepared-phones BY table_line,
           rs_prepared-emails BY table_line, rs_prepared-domains BY table_line.
-    DELETE ADJACENT DUPLICATES FROM: rs_prepared-tax_ids COMPARING table_line,
-                                     rs_prepared-ibans COMPARING table_line,
-                                     rs_prepared-addresses COMPARING table_line,
-                                     rs_prepared-phones COMPARING table_line,
-                                     rs_prepared-emails COMPARING table_line,
-                                     rs_prepared-domains COMPARING table_line.
+    DELETE ADJACENT DUPLICATES FROM: rs_prepared-tax_ids COMPARING ALL FIELDS,
+                                     rs_prepared-ibans COMPARING ALL FIELDS,
+                                     rs_prepared-addresses COMPARING ALL FIELDS,
+                                     rs_prepared-phones COMPARING ALL FIELDS,
+                                     rs_prepared-emails COMPARING ALL FIELDS,
+                                     rs_prepared-domains COMPARING ALL FIELDS.
   ENDMETHOD.
 
 
   METHOD add_keys.
-    DATA lv_value TYPE string.
-    DATA lv_first TYPE string.
-    DATA lv_longest TYPE string.
-
     IF weight( lif_dupl=>rule-tax_id ) > 0.
-      LOOP AT is_prepared-tax_ids INTO lv_value.
+      LOOP AT is_prepared-tax_ids INTO DATA(lv_value).
         add_key( EXPORTING iv_prefix = 'T' iv_value = lv_value iv_index = iv_index CHANGING ct_blocks = ct_blocks ).
       ENDLOOP.
     ENDIF.
@@ -1245,14 +1071,10 @@ CLASS lcl_matcher IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
     IF weight( lif_dupl=>rule-name ) > 0 AND is_prepared-tokens IS NOT INITIAL.
-      READ TABLE is_prepared-tokens INDEX 1 INTO lv_first.
-      IF strlen( lv_first ) > 3.
-        lv_value = lv_first(3).
-      ELSE.
-        lv_value = lv_first.
-      ENDIF.
+      DATA(lv_first) = is_prepared-tokens[ 1 ].
+      lv_value = COND #( WHEN strlen( lv_first ) > 3 THEN lv_first(3) ELSE lv_first ).
       add_key( EXPORTING iv_prefix = 'N' iv_value = lv_value iv_index = iv_index CHANGING ct_blocks = ct_blocks ).
-      lv_longest = lv_first.
+      DATA(lv_longest) = lv_first.
       LOOP AT is_prepared-tokens INTO lv_value.
         IF strlen( lv_value ) > strlen( lv_longest ).
           lv_longest = lv_value.
@@ -1264,19 +1086,18 @@ CLASS lcl_matcher IMPLEMENTATION.
 
 
   METHOD add_key.
-    DATA lv_key TYPE string.
-    DATA ls_block TYPE ty_block.
-    FIELD-SYMBOLS <ls_block> TYPE ty_block.
-
-    CONCATENATE iv_prefix ':' iv_value INTO lv_key.
-    READ TABLE ct_blocks WITH TABLE KEY key = lv_key ASSIGNING <ls_block>.
+    DATA(lv_key) = |{ iv_prefix }:{ iv_value }|.
+    READ TABLE ct_blocks WITH TABLE KEY key = lv_key ASSIGNING FIELD-SYMBOL(<ls_block>).
     IF sy-subrc <> 0.
-      ls_block-key = lv_key.
-      INSERT ls_block INTO TABLE ct_blocks ASSIGNING <ls_block>.
+      INSERT VALUE #( key = lv_key ) INTO TABLE ct_blocks ASSIGNING <ls_block>.
     ENDIF.
-    " A partner can produce the same key twice (two equal addresses)
-    READ TABLE <ls_block>-members WITH KEY table_line = iv_index TRANSPORTING NO FIELDS.
-    IF sy-subrc <> 0.
+    " FIND visits each partner index once, so duplicate keys for one partner are consecutive.
+    IF <ls_block>-last_index = iv_index.
+      RETURN.
+    ENDIF.
+    <ls_block>-last_index = iv_index.
+    <ls_block>-member_count = <ls_block>-member_count + 1.
+    IF <ls_block>-member_count <= mv_max_block + 1.
       APPEND iv_index TO <ls_block>-members.
     ENDIF.
   ENDMETHOD.
@@ -1285,21 +1106,17 @@ CLASS lcl_matcher IMPLEMENTATION.
   METHOD score.
     DATA lt_reasons TYPE lif_dupl=>ty_strings.
     DATA lv_rest TYPE p LENGTH 16 DECIMALS 10 VALUE 1.
-    DATA lv_value TYPE string.
-    DATA lv_reason TYPE string.
-    DATA lv_shown TYPE string.
-    DATA lv_weight TYPE i.
-    DATA lv_similarity TYPE i.
-    DATA lv_minimum TYPE i.
-    DATA lv_percent TYPE string.
-    DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
 
-    lv_weight = weight( lif_dupl=>rule-tax_id ).
-    lv_value = common( it_values = is_one-tax_ids it_others = is_other-tax_ids ).
+
+    DATA lv_similarity TYPE i.
+
+
+    DATA(lv_weight) = weight( lif_dupl=>rule-tax_id ).
+    DATA(lv_value) = common( it_values = is_one-tax_ids it_others = is_other-tax_ids ).
     IF lv_value IS NOT INITIAL AND lv_weight > 0.
       lv_rest = lv_rest * ( 100 - lv_weight ) / 100.
-      lv_shown = show( lv_value ).
-      CONCATENATE `Same tax number ` lv_shown INTO lv_reason.
+      DATA(lv_shown) = show( lv_value ).
+      DATA(lv_reason) = |Same tax number { lv_shown }|.
       APPEND lv_reason TO lt_reasons.
     ENDIF.
 
@@ -1308,22 +1125,22 @@ CLASS lcl_matcher IMPLEMENTATION.
     IF lv_value IS NOT INITIAL AND lv_weight > 0.
       lv_rest = lv_rest * ( 100 - lv_weight ) / 100.
       lv_shown = show( lv_value ).
-      CONCATENATE `Same IBAN ` lv_shown INTO lv_reason.
+      lv_reason = |Same IBAN { lv_shown }|.
       APPEND lv_reason TO lt_reasons.
     ENDIF.
 
     lv_weight = weight( lif_dupl=>rule-name ).
     IF lv_weight > 0.
       lv_similarity = similarity( it_tokens1 = is_one-tokens it_tokens2 = is_other-tokens ).
-      READ TABLE mt_rules WITH TABLE KEY rule = lif_dupl=>rule-name INTO ls_rule.
-      lv_minimum = ls_rule-min_similarity.
+      READ TABLE mt_rules WITH TABLE KEY rule = lif_dupl=>rule-name INTO DATA(ls_rule).
+      DATA(lv_minimum) = ls_rule-min_similarity.
       IF lv_similarity > 0 AND lv_similarity >= lv_minimum.
         lv_rest = lv_rest * ( 100 - lv_weight * lv_similarity / 100 ) / 100.
         IF lv_similarity = 100.
           lv_reason = `Same name`.
         ELSE.
-          lv_percent = lcl_text=>num( lv_similarity ).
-          CONCATENATE `Name ` lv_percent `% similar` INTO lv_reason.
+          DATA(lv_percent) = lcl_text=>num( lv_similarity ).
+          lv_reason = |Name { lv_percent }% similar|.
         ENDIF.
         APPEND lv_reason TO lt_reasons.
       ENDIF.
@@ -1354,7 +1171,7 @@ CLASS lcl_matcher IMPLEMENTATION.
         IF lv_value IS NOT INITIAL.
           " A shared company domain is weaker than the same address
           lv_rest = lv_rest * ( 100 - lv_weight / 2 ) / 100.
-          CONCATENATE `Same e-mail domain ` lv_value INTO lv_reason.
+          lv_reason = |Same e-mail domain { lv_value }|.
           APPEND lv_reason TO lt_reasons.
         ENDIF.
       ENDIF.
@@ -1363,7 +1180,7 @@ CLASS lcl_matcher IMPLEMENTATION.
     rs_line-finding = lif_dupl=>finding-duplicate.
     " Assigning a packed number to an integer rounds it
     rs_line-score = 100 * ( 1 - lv_rest ).
-    CONCATENATE LINES OF lt_reasons INTO rs_line-reasons SEPARATED BY `; `.
+    rs_line-reasons = concat_lines_of( table = lt_reasons sep = `; ` ).
     IF is_one-partner <= is_other-partner.
       rs_line-partner1 = is_one-partner.
       rs_line-name1 = is_one-name.
@@ -1379,18 +1196,13 @@ CLASS lcl_matcher IMPLEMENTATION.
 
 
   METHOD weight.
-    DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
-    READ TABLE mt_rules WITH TABLE KEY rule = iv_rule INTO ls_rule.
-    IF sy-subrc = 0.
-      rv_weight = ls_rule-weight.
-    ENDIF.
+    rv_weight = VALUE #( mt_rules[ rule = iv_rule ]-weight OPTIONAL ).
   ENDMETHOD.
 
 
   METHOD common.
     LOOP AT it_values INTO rv_value.
-      READ TABLE it_others WITH KEY table_line = rv_value TRANSPORTING NO FIELDS.
-      IF sy-subrc = 0.
+      IF line_exists( it_others[ table_line = rv_value ] ).
         RETURN.
       ENDIF.
     ENDLOOP.
@@ -1399,43 +1211,23 @@ CLASS lcl_matcher IMPLEMENTATION.
 
 
   METHOD show.
-    IF mv_unmask = abap_true.
-      rv_text = iv_value.
-    ELSE.
-      rv_text = lcl_tax_id=>mask( iv_value ).
-    ENDIF.
+    rv_text = COND #( WHEN mv_unmask = abap_true THEN iv_value ELSE lcl_tax_id=>mask( iv_value ) ).
   ENDMETHOD.
 
 
   METHOD describe_key.
-    DATA lv_value TYPE string.
-    DATA lv_count TYPE string.
-
-    lv_value = iv_key+2.
-    CASE iv_key(1).
-      WHEN 'T'.
-        lv_value = show( lv_value ).
-        CONCATENATE `Tax number ` lv_value INTO rv_text.
-      WHEN 'I'.
-        lv_value = show( lv_value ).
-        CONCATENATE `IBAN ` lv_value INTO rv_text.
-      WHEN 'A'.
-        CONCATENATE `Address ` lv_value INTO rv_text.
-      WHEN 'P'.
-        CONCATENATE `Phone ` lv_value INTO rv_text.
-      WHEN 'E'.
-        CONCATENATE `E-mail ` lv_value INTO rv_text.
-      WHEN 'D'.
-        CONCATENATE `E-mail domain ` lv_value INTO rv_text.
-      WHEN 'N'.
-        CONCATENATE `Names starting with ` lv_value INTO rv_text.
-      WHEN 'W'.
-        CONCATENATE `Names with the word ` lv_value INTO rv_text.
-      WHEN OTHERS.
-        rv_text = lv_value.
-    ENDCASE.
-    lv_count = lcl_text=>num( iv_count ).
-    CONCATENATE rv_text ` (` lv_count ` partners, not compared)` INTO rv_text.
+    DATA(lv_value) = iv_key+2.
+    DATA(lv_description) = SWITCH string( iv_key(1)
+      WHEN 'T' THEN |Tax number { show( lv_value ) }|
+      WHEN 'I' THEN |IBAN { show( lv_value ) }|
+      WHEN 'A' THEN |Address { lv_value }|
+      WHEN 'P' THEN |Phone { lv_value }|
+      WHEN 'E' THEN |E-mail { lv_value }|
+      WHEN 'D' THEN |E-mail domain { lv_value }|
+      WHEN 'N' THEN |Names starting with { lv_value }|
+      WHEN 'W' THEN |Names with the word { lv_value }|
+      ELSE lv_value ).
+    rv_text = |{ lv_description } ({ lcl_text=>num( iv_count ) } partners, not compared)|.
   ENDMETHOD.
 
 ENDCLASS.
@@ -1449,260 +1241,250 @@ ENDCLASS.
 * For another source, change this class; it only has to fill
 * LIF_DUPL=>TY_PARTNERS.
 *----------------------------------------------------------------------*
+CLASS lcl_authorization DEFINITION FINAL.
+  PUBLIC SECTION.
+    CLASS-METHODS require_run
+      IMPORTING iv_unmask TYPE abap_bool
+      RAISING lcx_error.
+    CLASS-METHODS can_read_group
+      IMPORTING iv_group TYPE but000-augrp
+      RETURNING VALUE(rv_allowed) TYPE abap_bool.
+    CLASS-METHODS can_decide
+      RETURNING VALUE(rv_allowed) TYPE abap_bool.
+    CLASS-METHODS require_decision
+      IMPORTING iv_partner1 TYPE bu_partner
+                iv_partner2 TYPE bu_partner
+      RAISING lcx_error.
+ENDCLASS.
+
+CLASS lcl_authorization IMPLEMENTATION.
+  METHOD require_run.
+    AUTHORITY-CHECK OBJECT 'ZCHE_DUPL' ID 'ACTVT' FIELD '03'.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING text = 'Not authorized to run duplicate search (ZCHE_DUPL, activity 03).'.
+    ENDIF.
+    IF iv_unmask = abap_true.
+      AUTHORITY-CHECK OBJECT 'ZCHE_DUPL' ID 'ACTVT' FIELD '16'.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING text = 'Not authorized to display full tax numbers or IBANs (ZCHE_DUPL, activity 16).'.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD can_read_group.
+    AUTHORITY-CHECK OBJECT 'B_BUPA_GRP'
+      ID 'ACTVT' FIELD '03'
+      ID 'BEGRU' FIELD iv_group.
+    rv_allowed = xsdbool( sy-subrc = 0 ).
+  ENDMETHOD.
+
+  METHOD can_decide.
+    AUTHORITY-CHECK OBJECT 'ZCHE_DUPL' ID 'ACTVT' FIELD '02'.
+    rv_allowed = xsdbool( sy-subrc = 0 ).
+  ENDMETHOD.
+
+  METHOD require_decision.
+    require_run( abap_false ).
+    IF can_decide( ) = abap_false.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING text = 'Not authorized to save decisions (ZCHE_DUPL, activity 02).'.
+    ENDIF.
+    IF iv_partner1 IS INITIAL OR iv_partner2 IS INITIAL OR iv_partner1 = iv_partner2.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING text = 'A decision requires two different existing business partners.'.
+    ENDIF.
+    DATA(partners) = VALUE lif_dupl=>ty_strings( ( CONV string( iv_partner1 ) )
+                                               ( CONV string( iv_partner2 ) ) ).
+    LOOP AT partners INTO DATA(partner).
+      SELECT SINGLE augrp FROM but000
+        WHERE partner = @partner AND xdele = @space
+        INTO @DATA(group).
+      IF sy-subrc <> 0 OR can_read_group( group ) = abap_false.
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING text = 'Both business partners must exist and be authorized for display.'.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS lcl_source_bp DEFINITION FINAL.
   PUBLIC SECTION.
     METHODS read
-      IMPORTING
-        is_settings        TYPE lif_dupl=>ty_settings
-      RETURNING
-        value(rt_partners) TYPE lif_dupl=>ty_partners.
-
+      IMPORTING is_settings TYPE lif_dupl=>ty_settings
+      RETURNING VALUE(rt_partners) TYPE lif_dupl=>ty_partners
+      RAISING lcx_error.
   PRIVATE SECTION.
     TYPES:
       BEGIN OF ty_key,
         partner TYPE bu_partner,
       END OF ty_key,
-      ty_keys TYPE SORTED TABLE OF ty_key WITH UNIQUE KEY partner.
-
-    TYPES:
-      BEGIN OF ty_but000,
-        partner    TYPE but000-partner,
-        type       TYPE but000-type,
-        name_org1  TYPE but000-name_org1,
-        name_org2  TYPE but000-name_org2,
-        name_org3  TYPE but000-name_org3,
-        name_org4  TYPE but000-name_org4,
-        name_first TYPE but000-name_first,
-        name_last  TYPE but000-name_last,
-        name_grp1  TYPE but000-name_grp1,
-        name_grp2  TYPE but000-name_grp2,
-      END OF ty_but000.
-
-    TYPES:
+      ty_keys TYPE SORTED TABLE OF ty_key WITH UNIQUE KEY partner,
       BEGIN OF ty_address,
-        partner    TYPE but020-partner,
+        partner TYPE but020-partner,
         addrnumber TYPE adrc-addrnumber,
-        country    TYPE adrc-country,
+        country TYPE adrc-country,
         post_code1 TYPE adrc-post_code1,
-        city1      TYPE adrc-city1,
-        street     TYPE adrc-street,
+        city1 TYPE adrc-city1,
+        street TYPE adrc-street,
         house_num1 TYPE adrc-house_num1,
-      END OF ty_address.
-
-    TYPES:
+      END OF ty_address,
+      ty_addresses TYPE SORTED TABLE OF ty_address WITH NON-UNIQUE KEY partner,
       BEGIN OF ty_phone,
         addrnumber TYPE adr2-addrnumber,
         tel_number TYPE adr2-tel_number,
-      END OF ty_phone.
-
-    TYPES:
+      END OF ty_phone,
+      ty_phones TYPE SORTED TABLE OF ty_phone WITH NON-UNIQUE KEY addrnumber,
       BEGIN OF ty_email,
         addrnumber TYPE adr6-addrnumber,
-        smtp_addr  TYPE adr6-smtp_addr,
-      END OF ty_email.
-
-    TYPES:
+        smtp_addr TYPE adr6-smtp_addr,
+      END OF ty_email,
+      ty_emails TYPE SORTED TABLE OF ty_email WITH NON-UNIQUE KEY addrnumber,
       BEGIN OF ty_tax,
-        partner  TYPE dfkkbptaxnum-partner,
-        taxnum   TYPE dfkkbptaxnum-taxnum,
+        partner TYPE dfkkbptaxnum-partner,
+        taxnum TYPE dfkkbptaxnum-taxnum,
         taxnumxl TYPE dfkkbptaxnum-taxnumxl,
-      END OF ty_tax.
-
-    TYPES:
+      END OF ty_tax,
+      ty_taxes TYPE SORTED TABLE OF ty_tax WITH NON-UNIQUE KEY partner,
       BEGIN OF ty_bank,
         partner TYPE but0bk-partner,
-        iban    TYPE but0bk-iban,
-      END OF ty_bank.
+        iban TYPE but0bk-iban,
+      END OF ty_bank,
+      ty_banks TYPE SORTED TABLE OF ty_bank WITH NON-UNIQUE KEY partner.
 ENDCLASS.
 
-
 CLASS lcl_source_bp IMPLEMENTATION.
-
   METHOD read.
-    DATA lt_keys TYPE ty_keys.
-    DATA ls_key TYPE ty_key.
-    DATA lr_group TYPE RANGE OF bu_group.
-    DATA ls_group LIKE LINE OF lr_group.
-    DATA lr_role TYPE RANGE OF bu_partnerrole.
-    DATA ls_role LIKE LINE OF lr_role.
-    DATA lt_but000 TYPE STANDARD TABLE OF ty_but000 WITH DEFAULT KEY.
-    DATA ls_bp TYPE ty_but000.
-    DATA lt_addresses TYPE STANDARD TABLE OF ty_address WITH DEFAULT KEY.
-    DATA ls_address TYPE ty_address.
-    DATA lt_phones TYPE STANDARD TABLE OF ty_phone WITH DEFAULT KEY.
-    DATA ls_phone TYPE ty_phone.
-    DATA lt_emails TYPE STANDARD TABLE OF ty_email WITH DEFAULT KEY.
-    DATA ls_email TYPE ty_email.
-    DATA lt_taxes TYPE STANDARD TABLE OF ty_tax WITH DEFAULT KEY.
-    DATA ls_tax TYPE ty_tax.
-    DATA lt_banks TYPE STANDARD TABLE OF ty_bank WITH DEFAULT KEY.
-    DATA ls_bank TYPE ty_bank.
-    DATA ls_partner TYPE lif_dupl=>ty_partner.
-    DATA ls_partner_address TYPE lif_dupl=>ty_address.
-    DATA lv_text TYPE string.
-    DATA lv_country_ok TYPE abap_bool.
-
+    lcl_authorization=>require_run( is_settings-unmask ).
+    DATA key_timestamp TYPE timestamp.
+    CONVERT DATE is_settings-key_date TIME '000000'
+      INTO TIME STAMP key_timestamp TIME ZONE 'UTC'.
+    IF sy-subrc <> 0 OR key_timestamp IS INITIAL.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING text = 'Enter a valid reference date; validity is evaluated at 00:00 UTC.'.
+    ENDIF.
+    DATA timestamp_text TYPE n LENGTH 14.
+    timestamp_text = key_timestamp.
+    DATA groups TYPE RANGE OF bu_group.
     IF is_settings-bp_group IS NOT INITIAL.
-      ls_group-sign = 'I'.
-      ls_group-option = 'EQ'.
-      ls_group-low = is_settings-bp_group.
-      APPEND ls_group TO lr_group.
+      groups = VALUE #( ( sign = 'I' option = 'EQ' low = is_settings-bp_group ) ).
     ENDIF.
+    DATA(all_roles) = xsdbool( is_settings-bp_role IS INITIAL ).
+    DATA(all_countries) = xsdbool( is_settings-country IS INITIAL ).
 
-    IF is_settings-bp_role IS INITIAL.
-      SELECT partner type name_org1 name_org2 name_org3 name_org4
-             name_first name_last name_grp1 name_grp2
-        FROM but000
-        INTO TABLE lt_but000
-        WHERE bu_group IN lr_group
-          AND xdele = space
-        ORDER BY partner.
-    ELSE.
-      ls_role-sign = 'I'.
-      ls_role-option = 'EQ'.
-      ls_role-low = is_settings-bp_role.
-      APPEND ls_role TO lr_role.
-      SELECT partner type name_org1 name_org2 name_org3 name_org4
-             name_first name_last name_grp1 name_grp2
-        FROM but000
-        INTO TABLE lt_but000
-        WHERE bu_group IN lr_group
-          AND xdele = space
-          AND partner IN ( SELECT partner FROM but100 WHERE rltyp IN lr_role )
-        ORDER BY partner.
-    ENDIF.
-    IF lt_but000 IS INITIAL.
+    " Read IDs and authorization groups first. Country and role eligibility
+    " are applied before loading names, tax IDs, contacts or bank details.
+    SELECT partner, augrp FROM but000
+      WHERE bu_group IN @groups AND xdele = @space
+        AND ( @all_roles = @abap_true
+              OR partner IN ( SELECT partner FROM but100
+                WHERE rltyp = @is_settings-bp_role
+                  AND ( valid_from = 0 OR valid_from <= @key_timestamp )
+                  AND ( valid_to = 0 OR valid_to >= @key_timestamp ) ) )
+        AND ( @all_countries = @abap_true
+              OR partner IN ( SELECT b~partner FROM but020 AS b
+                INNER JOIN adrc AS a ON a~addrnumber = b~addrnumber
+                WHERE a~country = @is_settings-country AND a~nation = @space
+                  AND ( b~addr_valid_from = 0 OR b~addr_valid_from <= @key_timestamp )
+                  AND ( b~addr_valid_to = 0 OR b~addr_valid_to >= @key_timestamp )
+                  AND ( a~date_from = '00000000' OR a~date_from <= @is_settings-key_date )
+                  AND ( a~date_to = '00000000' OR a~date_to >= @is_settings-key_date ) ) )
+      ORDER BY partner
+      INTO TABLE @DATA(candidates).
+    DATA keys TYPE ty_keys.
+    LOOP AT candidates INTO DATA(candidate).
+      IF lcl_authorization=>can_read_group( candidate-augrp ) = abap_true.
+        INSERT VALUE #( partner = candidate-partner ) INTO TABLE keys.
+      ENDIF.
+    ENDLOOP.
+    IF keys IS INITIAL.
+      IF candidates IS NOT INITIAL.
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING text = 'No selected business partners are authorized for display (B_BUPA_GRP, activity 03).'.
+      ENDIF.
       RETURN.
     ENDIF.
-    LOOP AT lt_but000 INTO ls_bp.
-      ls_key-partner = ls_bp-partner.
-      INSERT ls_key INTO TABLE lt_keys.
-    ENDLOOP.
 
-    SELECT b~partner a~addrnumber a~country a~post_code1 a~city1 a~street a~house_num1
+    SELECT partner, type, name_org1, name_org2, name_org3, name_org4,
+           name_first, name_last, name_grp1, name_grp2
+      FROM but000
+      FOR ALL ENTRIES IN @keys
+      WHERE partner = @keys-partner
+      INTO TABLE @DATA(partner_data).
+    SORT partner_data BY partner.
+    DATA addresses TYPE ty_addresses.
+    SELECT b~partner, a~addrnumber, a~country, a~post_code1, a~city1, a~street, a~house_num1
       FROM but020 AS b
       INNER JOIN adrc AS a ON a~addrnumber = b~addrnumber
-      INTO TABLE lt_addresses
-      FOR ALL ENTRIES IN lt_keys
-      WHERE b~partner = lt_keys-partner
-        AND a~nation = space.
-    SORT lt_addresses BY partner.
-
-    IF lt_addresses IS NOT INITIAL.
-      SELECT addrnumber tel_number
-        FROM adr2
-        INTO TABLE lt_phones
-        FOR ALL ENTRIES IN lt_addresses
-        WHERE addrnumber = lt_addresses-addrnumber
-          AND persnumber = space.
-      SORT lt_phones BY addrnumber.
-
-      SELECT addrnumber smtp_addr
-        FROM adr6
-        INTO TABLE lt_emails
-        FOR ALL ENTRIES IN lt_addresses
-        WHERE addrnumber = lt_addresses-addrnumber
-          AND persnumber = space.
-      SORT lt_emails BY addrnumber.
+      FOR ALL ENTRIES IN @keys
+      WHERE b~partner = @keys-partner AND a~nation = @space
+        AND ( b~addr_valid_from = 0 OR b~addr_valid_from <= @key_timestamp )
+        AND ( b~addr_valid_to = 0 OR b~addr_valid_to >= @key_timestamp )
+        AND ( a~date_from = '00000000' OR a~date_from <= @is_settings-key_date )
+        AND ( a~date_to = '00000000' OR a~date_to >= @is_settings-key_date )
+      INTO TABLE @addresses.
+    DATA phones TYPE ty_phones.
+    DATA emails TYPE ty_emails.
+    IF addresses IS NOT INITIAL.
+      SELECT addrnumber, tel_number FROM adr2
+        FOR ALL ENTRIES IN @addresses
+        WHERE addrnumber = @addresses-addrnumber AND persnumber = @space AND flg_nouse = @space
+          AND ( date_from = '00000000' OR date_from <= @is_settings-key_date )
+          AND ( valid_from = @space OR valid_from = '00000000000000' OR valid_from <= @timestamp_text )
+          AND ( valid_to = @space OR valid_to = '00000000000000' OR valid_to >= @timestamp_text )
+        INTO TABLE @phones.
+      SELECT addrnumber, smtp_addr FROM adr6
+        FOR ALL ENTRIES IN @addresses
+        WHERE addrnumber = @addresses-addrnumber AND persnumber = @space AND flg_nouse = @space
+          AND ( date_from = '00000000' OR date_from <= @is_settings-key_date )
+          AND ( valid_from = @space OR valid_from = '00000000000000' OR valid_from <= @timestamp_text )
+          AND ( valid_to = @space OR valid_to = '00000000000000' OR valid_to >= @timestamp_text )
+        INTO TABLE @emails.
     ENDIF.
+    DATA taxes TYPE ty_taxes.
+    IF is_settings-tax_type IS NOT INITIAL.
+      SELECT partner, taxnum, taxnumxl FROM dfkkbptaxnum
+        FOR ALL ENTRIES IN @keys
+        WHERE partner = @keys-partner AND taxtype = @is_settings-tax_type
+        INTO TABLE @taxes.
+    ENDIF.
+    DATA banks TYPE ty_banks.
+    SELECT partner, iban FROM but0bk
+      FOR ALL ENTRIES IN @keys
+      WHERE partner = @keys-partner AND iban <> @space
+        AND ( bk_valid_from = 0 OR bk_valid_from <= @key_timestamp )
+        AND ( bk_valid_to = 0 OR bk_valid_to >= @key_timestamp )
+      INTO TABLE @banks.
 
-    SELECT partner taxnum taxnumxl
-      FROM dfkkbptaxnum
-      INTO TABLE lt_taxes
-      FOR ALL ENTRIES IN lt_keys
-      WHERE partner = lt_keys-partner
-        AND taxtype = is_settings-tax_type.
-    SORT lt_taxes BY partner.
-
-    SELECT partner iban
-      FROM but0bk
-      INTO TABLE lt_banks
-      FOR ALL ENTRIES IN lt_keys
-      WHERE partner = lt_keys-partner
-        AND iban <> space.
-    SORT lt_banks BY partner.
-
-    LOOP AT lt_but000 INTO ls_bp.
-      CLEAR ls_partner.
-      ls_partner-partner = ls_bp-partner.
-      CASE ls_bp-type.
-        WHEN '1'.
-          CONCATENATE ls_bp-name_first ls_bp-name_last INTO lv_text SEPARATED BY space.
-        WHEN '3'.
-          CONCATENATE ls_bp-name_grp1 ls_bp-name_grp2 INTO lv_text SEPARATED BY space.
-        WHEN OTHERS.
-          CONCATENATE ls_bp-name_org1 ls_bp-name_org2 ls_bp-name_org3 ls_bp-name_org4
-            INTO lv_text SEPARATED BY space.
-      ENDCASE.
-      CONDENSE lv_text.
-      ls_partner-name = lv_text.
-
-      IF is_settings-country IS INITIAL.
-        lv_country_ok = abap_true.
-      ELSE.
-        lv_country_ok = abap_false.
-      ENDIF.
-      READ TABLE lt_addresses TRANSPORTING NO FIELDS WITH KEY partner = ls_bp-partner BINARY SEARCH.
-      LOOP AT lt_addresses INTO ls_address FROM sy-tabix.
-        IF ls_address-partner <> ls_bp-partner.
-          EXIT.
-        ENDIF.
-        IF ls_address-country = is_settings-country.
-          lv_country_ok = abap_true.
-        ENDIF.
-        ls_partner_address-country = ls_address-country.
-        ls_partner_address-post_code = ls_address-post_code1.
-        ls_partner_address-city = ls_address-city1.
-        ls_partner_address-street = ls_address-street.
-        ls_partner_address-house_no = ls_address-house_num1.
-        APPEND ls_partner_address TO ls_partner-addresses.
-        READ TABLE lt_phones TRANSPORTING NO FIELDS WITH KEY addrnumber = ls_address-addrnumber BINARY SEARCH.
-        LOOP AT lt_phones INTO ls_phone FROM sy-tabix.
-          IF ls_phone-addrnumber <> ls_address-addrnumber.
-            EXIT.
-          ENDIF.
-          lv_text = ls_phone-tel_number.
-          APPEND lv_text TO ls_partner-phones.
+    LOOP AT partner_data INTO DATA(bp).
+      DATA(partner) = VALUE lif_dupl=>ty_partner(
+        partner = bp-partner
+        name = COND #( WHEN bp-type = '1' THEN |{ bp-name_first } { bp-name_last }|
+                       WHEN bp-type = '3' THEN |{ bp-name_grp1 } { bp-name_grp2 }|
+                       ELSE |{ bp-name_org1 } { bp-name_org2 } { bp-name_org3 } { bp-name_org4 }| ) ).
+      partner-name = condense( partner-name ).
+      LOOP AT addresses INTO DATA(address) WHERE partner = bp-partner.
+        APPEND VALUE #( country = address-country post_code = address-post_code1
+                        city = address-city1 street = address-street house_no = address-house_num1 )
+          TO partner-addresses.
+        LOOP AT phones INTO DATA(phone) WHERE addrnumber = address-addrnumber.
+          APPEND CONV string( phone-tel_number ) TO partner-phones.
         ENDLOOP.
-        READ TABLE lt_emails TRANSPORTING NO FIELDS WITH KEY addrnumber = ls_address-addrnumber BINARY SEARCH.
-        LOOP AT lt_emails INTO ls_email FROM sy-tabix.
-          IF ls_email-addrnumber <> ls_address-addrnumber.
-            EXIT.
-          ENDIF.
-          lv_text = ls_email-smtp_addr.
-          APPEND lv_text TO ls_partner-emails.
+        LOOP AT emails INTO DATA(email) WHERE addrnumber = address-addrnumber.
+          APPEND CONV string( email-smtp_addr ) TO partner-emails.
         ENDLOOP.
       ENDLOOP.
-      IF lv_country_ok = abap_false.
-        CONTINUE.
-      ENDIF.
-
-      READ TABLE lt_taxes TRANSPORTING NO FIELDS WITH KEY partner = ls_bp-partner BINARY SEARCH.
-      LOOP AT lt_taxes INTO ls_tax FROM sy-tabix.
-        IF ls_tax-partner <> ls_bp-partner.
-          EXIT.
-        ENDIF.
-        IF ls_tax-taxnum IS NOT INITIAL.
-          lv_text = ls_tax-taxnum.
-        ELSE.
-          lv_text = ls_tax-taxnumxl.
-        ENDIF.
-        APPEND lv_text TO ls_partner-tax_ids.
+      LOOP AT taxes INTO DATA(tax) WHERE partner = bp-partner.
+        APPEND COND string( WHEN tax-taxnumxl IS NOT INITIAL THEN tax-taxnumxl ELSE tax-taxnum )
+          TO partner-tax_ids.
       ENDLOOP.
-
-      READ TABLE lt_banks TRANSPORTING NO FIELDS WITH KEY partner = ls_bp-partner BINARY SEARCH.
-      LOOP AT lt_banks INTO ls_bank FROM sy-tabix.
-        IF ls_bank-partner <> ls_bp-partner.
-          EXIT.
-        ENDIF.
-        lv_text = ls_bank-iban.
-        APPEND lv_text TO ls_partner-ibans.
+      LOOP AT banks INTO DATA(bank) WHERE partner = bp-partner.
+        APPEND CONV string( bank-iban ) TO partner-ibans.
       ENDLOOP.
-
-      APPEND ls_partner TO rt_partners.
+      APPEND partner TO rt_partners.
     ENDLOOP.
   ENDMETHOD.
-
 ENDCLASS.
 
 
@@ -1714,90 +1496,85 @@ ENDCLASS.
 CLASS lcl_decisions DEFINITION FINAL.
   PUBLIC SECTION.
     CONSTANTS c_id TYPE indx-srtfd VALUE 'ZCHE_DUPL_DECISIONS'.
-
     CLASS-METHODS load
-      RETURNING
-        value(rt_decisions) TYPE lif_dupl=>ty_decisions.
-
-    "! Saves a decision and commits
+      RETURNING VALUE(rt_decisions) TYPE lif_dupl=>ty_decisions
+      RAISING lcx_error.
     CLASS-METHODS save
-      IMPORTING
-        iv_partner1 TYPE bu_partner
-        iv_partner2 TYPE bu_partner
-        iv_decision TYPE lif_dupl=>ty_decision_code
-      RAISING
-        lcx_error.
+      IMPORTING iv_partner1 TYPE bu_partner
+                iv_partner2 TYPE bu_partner
+                iv_decision TYPE lif_dupl=>ty_decision_code
+      RAISING lcx_error.
+  PRIVATE SECTION.
+    CLASS-METHODS release_lock
+      IMPORTING iv_key TYPE rstable-varkey.
 ENDCLASS.
 
-
 CLASS lcl_decisions IMPLEMENTATION.
-
   METHOD load.
-    IMPORT decisions = rt_decisions FROM DATABASE indx(zc) ID c_id.
-    IF sy-subrc <> 0.
-      CLEAR rt_decisions.
-    ENDIF.
+    lcl_authorization=>require_run( abap_false ).
+    TRY.
+        IMPORT decisions = rt_decisions FROM DATABASE indx(zc) ID c_id.
+        IF sy-subrc <> 0.
+          CLEAR rt_decisions.
+        ENDIF.
+      CATCH cx_sy_import_mismatch_error cx_sy_import_format_error cx_sy_open_sql_db INTO DATA(error).
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING text = |Cannot read saved duplicate decisions: { error->get_text( ) }|.
+    ENDTRY.
   ENDMETHOD.
-
 
   METHOD save.
-    DATA lv_varkey TYPE rstable-varkey.
-    DATA lv_text TYPE string.
-    DATA lv_en TYPE string.
-    DATA lv_tr TYPE string.
-    DATA lt_decisions TYPE lif_dupl=>ty_decisions.
-    DATA ls_decision TYPE lif_dupl=>ty_decision.
-    DATA ls_indx TYPE indx.
-
-    " Two users deciding at the same time must not overwrite each other
-    CONCATENATE sy-mandt 'ZC' c_id INTO lv_varkey.
+    lcl_authorization=>require_decision( iv_partner1 = iv_partner1 iv_partner2 = iv_partner2 ).
+    IF iv_decision <> lif_dupl=>decision-duplicate AND iv_decision <> lif_dupl=>decision-not_duplicate.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING text = 'Choose Duplicate or Not a duplicate.'.
+    ENDIF.
+    DATA(lock_key) = CONV rstable-varkey( |{ sy-mandt }ZC{ c_id }| ).
     CALL FUNCTION 'ENQUEUE_E_TABLE'
-      EXPORTING
-        tabname        = 'INDX'
-        varkey         = lv_varkey
-        _wait          = abap_true
-      EXCEPTIONS
-        foreign_lock   = 1
-        system_failure = 2
-        OTHERS         = 3.
+      EXPORTING tabname = 'INDX' varkey = lock_key _wait = abap_true
+      EXCEPTIONS foreign_lock = 1 system_failure = 2 OTHERS = 3.
     IF sy-subrc <> 0.
-      CONCATENATE `Decisions are locked by user ` sy-msgv1 `. Try again.` INTO lv_en.
-      CONCATENATE `Kararlar ` sy-msgv1 ` kullanıcısı tarafından kilitli. Tekrar deneyin.` INTO lv_tr.
-      lv_text = lcl_text=>get( iv_en = lv_en iv_tr = lv_tr ).
       RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          text = lv_text.
+        EXPORTING text = |Cannot lock saved decisions ({ sy-msgv1 }); try again.|.
     ENDIF.
 
-    lt_decisions = load( ).
-    " Same order as in the result lines: the smaller number first
-    IF iv_partner1 <= iv_partner2.
-      ls_decision-partner1 = iv_partner1.
-      ls_decision-partner2 = iv_partner2.
-    ELSE.
-      ls_decision-partner1 = iv_partner2.
-      ls_decision-partner2 = iv_partner1.
-    ENDIF.
-    ls_decision-decision = iv_decision.
-    ls_decision-changed_by = sy-uname.
-    GET TIME STAMP FIELD ls_decision-changed_at.
-    MODIFY TABLE lt_decisions FROM ls_decision.
-    IF sy-subrc <> 0.
-      INSERT ls_decision INTO TABLE lt_decisions.
-    ENDIF.
-
-    ls_indx-aedat = sy-datum.
-    ls_indx-usera = sy-uname.
-    ls_indx-pgmid = sy-repid.
-    EXPORT decisions = lt_decisions TO DATABASE indx(zc) FROM ls_indx ID c_id.
-    COMMIT WORK.
-
-    CALL FUNCTION 'DEQUEUE_E_TABLE'
-      EXPORTING
-        tabname = 'INDX'
-        varkey  = lv_varkey.
+    TRY.
+        " Reload under the shared lock so different pairs are not lost.
+        DATA(decisions) = load( ).
+        DATA(decision) = VALUE lif_dupl=>ty_decision(
+          partner1 = COND #( WHEN iv_partner1 <= iv_partner2 THEN iv_partner1 ELSE iv_partner2 )
+          partner2 = COND #( WHEN iv_partner1 <= iv_partner2 THEN iv_partner2 ELSE iv_partner1 )
+          decision = iv_decision changed_by = sy-uname ).
+        GET TIME STAMP FIELD decision-changed_at.
+        MODIFY TABLE decisions FROM decision.
+        IF sy-subrc <> 0.
+          INSERT decision INTO TABLE decisions.
+        ENDIF.
+        DATA(index_entry) = VALUE indx( aedat = sy-datum usera = sy-uname pgmid = sy-repid ).
+        EXPORT decisions = decisions TO DATABASE indx(zc) FROM index_entry ID c_id.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE lcx_error EXPORTING text = 'Saving the duplicate decision failed.'.
+        ENDIF.
+        COMMIT WORK AND WAIT.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE lcx_error EXPORTING text = 'Committing the duplicate decision failed.'.
+        ENDIF.
+      CATCH lcx_error INTO DATA(decision_error).
+        ROLLBACK WORK.
+        release_lock( lock_key ).
+        RAISE EXCEPTION decision_error.
+      CATCH cx_sy_open_sql_db INTO DATA(database_error).
+        ROLLBACK WORK.
+        release_lock( lock_key ).
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING text = |Cannot save duplicate decision: { database_error->get_text( ) }|.
+    ENDTRY.
+    release_lock( lock_key ).
   ENDMETHOD.
 
+  METHOD release_lock.
+    CALL FUNCTION 'DEQUEUE_E_TABLE'
+      EXPORTING tabname = 'INDX' varkey = iv_key.
+  ENDMETHOD.
 ENDCLASS.
 
 
@@ -1814,7 +1591,8 @@ CLASS lcl_finder DEFINITION FINAL.
       IMPORTING
         iv_show_decided  TYPE abap_bool DEFAULT abap_false
       RETURNING
-        value(rs_result) TYPE lif_dupl=>ty_result.
+        VALUE(rs_result) TYPE lif_dupl=>ty_result
+      RAISING lcx_error.
 
     "! Fills the decision of each pair; hides "not a duplicate" pairs unless asked
     CLASS-METHODS apply_decisions
@@ -1828,6 +1606,7 @@ CLASS lcl_finder DEFINITION FINAL.
       IMPORTING
         it_partners TYPE lif_dupl=>ty_partners
         iv_unmask   TYPE abap_bool
+        iv_check    TYPE abap_bool DEFAULT abap_false
       CHANGING
         cs_result   TYPE lif_dupl=>ty_result.
 
@@ -1840,85 +1619,64 @@ ENDCLASS.
 CLASS lcl_finder IMPLEMENTATION.
 
   METHOD constructor.
-    DATA lo_normalizer TYPE REF TO lcl_normalizer.
-
     ms_settings = is_settings.
-    CREATE OBJECT lo_normalizer
-      EXPORTING
-        it_extra_words = is_settings-stop_words.
-    CREATE OBJECT mo_matcher
-      EXPORTING
-        it_rules      = is_settings-rules
-        io_normalizer = lo_normalizer
-        iv_threshold  = is_settings-threshold
-        iv_max_block  = is_settings-max_block
-        iv_unmask     = is_settings-unmask.
+    mo_matcher = NEW lcl_matcher(
+      it_rules = is_settings-rules
+      io_normalizer = NEW lcl_normalizer( it_extra_words = is_settings-stop_words )
+      iv_threshold = is_settings-threshold
+      iv_max_block = is_settings-max_block
+      iv_unmask = is_settings-unmask ).
   ENDMETHOD.
 
 
   METHOD run.
-    DATA lo_source TYPE REF TO lcl_source_bp.
-    DATA lt_partners TYPE lif_dupl=>ty_partners.
-    DATA lt_decisions TYPE lif_dupl=>ty_decisions.
-
-    CREATE OBJECT lo_source.
-    lt_partners = lo_source->read( ms_settings ).
-    rs_result = mo_matcher->find( lt_partners ).
-    lt_decisions = lcl_decisions=>load( ).
-    apply_decisions( EXPORTING it_decisions    = lt_decisions
+    lcl_authorization=>require_run( ms_settings-unmask ).
+    DATA(partners) = NEW lcl_source_bp( )->read( ms_settings ).
+    rs_result = mo_matcher->find( partners ).
+    apply_decisions( EXPORTING it_decisions = lcl_decisions=>load( )
                                iv_show_decided = iv_show_decided
-                     CHANGING  cs_result       = rs_result ).
-    add_tax_id_findings( EXPORTING it_partners = lt_partners
-                                   iv_unmask   = ms_settings-unmask
-                         CHANGING  cs_result   = rs_result ).
+                     CHANGING cs_result = rs_result ).
+    add_tax_id_findings( EXPORTING it_partners = partners
+                                   iv_unmask = ms_settings-unmask
+                                   iv_check = ms_settings-tax_check
+                         CHANGING cs_result = rs_result ).
   ENDMETHOD.
 
 
   METHOD apply_decisions.
-    DATA ls_decision TYPE lif_dupl=>ty_decision.
-    DATA lv_before TYPE i.
-    FIELD-SYMBOLS <ls_line> TYPE lif_dupl=>ty_line.
-
-    LOOP AT cs_result-lines ASSIGNING <ls_line>.
-      READ TABLE it_decisions INTO ls_decision
-        WITH TABLE KEY partner1 = <ls_line>-partner1 partner2 = <ls_line>-partner2.
+    LOOP AT cs_result-lines ASSIGNING FIELD-SYMBOL(<line>).
+      READ TABLE it_decisions INTO DATA(decision)
+        WITH TABLE KEY partner1 = <line>-partner1 partner2 = <line>-partner2.
       IF sy-subrc = 0.
-        <ls_line>-decision = ls_decision-decision.
+        <line>-decision = decision-decision.
       ENDIF.
     ENDLOOP.
-
     IF iv_show_decided = abap_false.
-      lv_before = lines( cs_result-lines ).
+      DATA(before) = lines( cs_result-lines ).
       DELETE cs_result-lines WHERE decision = lif_dupl=>decision-not_duplicate.
-      cs_result-hidden_pairs = lv_before - lines( cs_result-lines ).
+      cs_result-hidden_pairs = before - lines( cs_result-lines ).
     ENDIF.
   ENDMETHOD.
 
 
   METHOD add_tax_id_findings.
-    DATA ls_partner TYPE lif_dupl=>ty_partner.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-    DATA lv_tax_id TYPE string.
-    DATA lv_problem TYPE string.
-    DATA lv_masked TYPE string.
-
-    LOOP AT it_partners INTO ls_partner.
-      LOOP AT ls_partner-tax_ids INTO lv_tax_id.
-        lv_problem = lcl_tax_id=>check( lv_tax_id ).
-        IF lv_problem IS INITIAL.
+    IF iv_check = abap_false.
+      RETURN.
+    ENDIF.
+    LOOP AT it_partners INTO DATA(partner).
+      LOOP AT partner-tax_ids INTO DATA(tax_id).
+        DATA(problem) = lcl_tax_id=>check( tax_id ).
+        IF problem IS INITIAL.
           CONTINUE.
         ENDIF.
         IF iv_unmask = abap_true.
-          CONDENSE lv_tax_id.
-          lv_masked = lcl_tax_id=>mask( lv_tax_id ).
-          REPLACE lv_masked IN lv_problem WITH lv_tax_id.
+          tax_id = condense( tax_id ).
+          DATA(masked) = lcl_tax_id=>mask( tax_id ).
+          REPLACE masked IN problem WITH tax_id.
         ENDIF.
-        CLEAR ls_line.
-        ls_line-finding = lif_dupl=>finding-invalid_tax_id.
-        ls_line-partner1 = ls_partner-partner.
-        ls_line-name1 = ls_partner-name.
-        ls_line-reasons = lv_problem.
-        APPEND ls_line TO cs_result-lines.
+        APPEND VALUE #( finding = lif_dupl=>finding-invalid_tax_id
+                        partner1 = partner-partner name1 = partner-name reasons = problem )
+          TO cs_result-lines.
       ENDLOOP.
     ENDLOOP.
   ENDMETHOD.
@@ -1944,7 +1702,7 @@ CLASS lcl_app DEFINITION FINAL.
         mark_dup TYPE icon_d,
         mark_not TYPE icon_d,
       END OF ty_row,
-      ty_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
+      ty_rows TYPE STANDARD TABLE OF ty_row WITH EMPTY KEY.
 
     "! Checks the screen; returns an error text or nothing
     CLASS-METHODS check_settings
@@ -1995,6 +1753,17 @@ CLASS lcl_app IMPLEMENTATION.
   METHOD check_settings.
     DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
 
+    IF is_settings-key_date IS INITIAL.
+      rv_problem = lcl_text=>get( iv_en = `Enter a master-data reference date.`
+                                  iv_tr = `Ana veri referans tarihini girin.` ).
+      RETURN.
+    ENDIF.
+    IF is_settings-tax_check = abap_true AND is_settings-country IS NOT INITIAL AND is_settings-country <> 'TR'.
+      rv_problem = lcl_text=>get( iv_en = `Turkish checksum validation cannot be used with another country.`
+                                  iv_tr = `Türk vergi numarası kontrolü başka bir ülkeyle kullanılamaz.` ).
+      RETURN.
+    ENDIF.
+
     LOOP AT is_settings-rules INTO ls_rule.
       IF ls_rule-weight NOT BETWEEN 0 AND 100 OR ls_rule-min_similarity NOT BETWEEN 0 AND 100.
         rv_problem = lcl_text=>get( iv_en = 'Weights and the name similarity must be between 0 and 100.'
@@ -2013,7 +1782,7 @@ CLASS lcl_app IMPLEMENTATION.
       RETURN.
     ENDIF.
     READ TABLE is_settings-rules WITH TABLE KEY rule = lif_dupl=>rule-tax_id INTO ls_rule.
-    IF is_settings-tax_type IS INITIAL AND ls_rule-weight > 0.
+    IF is_settings-tax_type IS INITIAL AND ( ls_rule-weight > 0 OR is_settings-tax_check = abap_true ).
       rv_problem = lcl_text=>get( iv_en = 'Enter the tax number category (for example TR2), or set its weight to 0.'
                                   iv_tr = 'Vergi numarası kategorisini girin (örneğin TR2) ya da ağırlığını 0 yapın.' ).
     ENDIF.
@@ -2021,56 +1790,50 @@ CLASS lcl_app IMPLEMENTATION.
 
 
   METHOD run.
-    DATA lo_finder TYPE REF TO lcl_finder.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-    DATA ls_row TYPE ty_row.
     DATA lv_pairs TYPE i.
-    DATA lv_invalid TYPE i.
-    DATA lv_en TYPE string.
-    DATA lv_tr TYPE string.
-    DATA lv_summary TYPE string.
-    DATA lv_skipped TYPE string.
-    DATA lv_partners TYPE string.
-    DATA lv_pairs_text TYPE string.
-    DATA lv_invalid_text TYPE string.
-    DATA lv_hidden_text TYPE string.
 
-    CREATE OBJECT lo_finder
-      EXPORTING
-        is_settings = is_settings.
-    ls_result = lo_finder->run( iv_show_decided ).
+    CLEAR gt_rows.
+    TRY.
+        DATA(ls_result) = NEW lcl_finder( is_settings )->run( iv_show_decided ).
+      CATCH lcx_error INTO DATA(lx_error).
+        DATA(lv_error) = lx_error->get_text( ).
+        IF sy-batch = abap_true.
+          MESSAGE lv_error TYPE 'E'.
+        ELSE.
+          MESSAGE lv_error TYPE 'I' DISPLAY LIKE 'E'.
+        ENDIF.
+        RETURN.
+    ENDTRY.
 
-    LOOP AT ls_result-lines INTO ls_line.
-      CLEAR ls_row.
-      MOVE-CORRESPONDING ls_line TO ls_row.
+    DATA(lv_can_decide) = lcl_authorization=>can_decide( ).
+
+    LOOP AT ls_result-lines INTO DATA(ls_line).
+      DATA(ls_row) = CORRESPONDING ty_row( ls_line ).
       IF ls_line-finding = lif_dupl=>finding-duplicate.
-        ls_row-mark_dup = icon_okay.
-        ls_row-mark_not = icon_cancel.
+        IF lv_can_decide = abap_true.
+          ls_row-mark_dup = icon_okay.
+          ls_row-mark_not = icon_cancel.
+        ENDIF.
         lv_pairs = lv_pairs + 1.
       ENDIF.
       APPEND ls_row TO gt_rows.
     ENDLOOP.
-    lv_invalid = lines( gt_rows ) - lv_pairs.
-
-    lv_partners = lcl_text=>num( ls_result-partners ).
-    lv_pairs_text = lcl_text=>num( lv_pairs ).
-    lv_invalid_text = lcl_text=>num( lv_invalid ).
-    CONCATENATE lv_partners ` partners read: ` lv_pairs_text ` likely duplicate pairs, `
-                lv_invalid_text ` invalid tax numbers` INTO lv_en.
-    CONCATENATE lv_partners ` cari okundu: ` lv_pairs_text ` olası mükerrer çift, `
-                lv_invalid_text ` hatalı vergi numarası` INTO lv_tr.
+    DATA(lv_invalid) = lines( gt_rows ) - lv_pairs.
+    DATA(lv_en) = |{ ls_result-partners NUMBER = RAW } partners read: { lv_pairs NUMBER = RAW } likely duplicate pairs, |
+               && |{ lv_invalid NUMBER = RAW } invalid tax numbers|.
+    DATA(lv_tr) = |{ ls_result-partners NUMBER = RAW } cari okundu: { lv_pairs NUMBER = RAW } olası mükerrer çift, |
+               && |{ lv_invalid NUMBER = RAW } hatalı vergi numarası|.
     IF ls_result-hidden_pairs > 0.
-      lv_hidden_text = lcl_text=>num( ls_result-hidden_pairs ).
-      CONCATENATE lv_en `, ` lv_hidden_text ` pairs hidden (marked not duplicate)` INTO lv_en.
-      CONCATENATE lv_tr `, ` lv_hidden_text ` çift gizlendi (mükerrer değil)` INTO lv_tr.
+      lv_en = |{ lv_en }, { ls_result-hidden_pairs NUMBER = RAW } pairs hidden (marked not duplicate)|.
+      lv_tr = |{ lv_tr }, { ls_result-hidden_pairs NUMBER = RAW } çift gizlendi (mükerrer değil)|.
     ENDIF.
-    lv_summary = lcl_text=>get( iv_en = lv_en iv_tr = lv_tr ).
+    DATA(lv_summary) = lcl_text=>get( iv_en = lv_en iv_tr = lv_tr ).
     MESSAGE lv_summary TYPE 'S'.
+    MESSAGE |Reference date: { is_settings-key_date DATE = ISO } 00:00 UTC; version { lif_dupl=>version }| TYPE 'S'.
 
-    LOOP AT ls_result-skipped_blocks INTO lv_skipped.
+    LOOP AT ls_result-skipped_blocks INTO DATA(lv_skipped).
       lv_summary = lcl_text=>get( iv_en = 'Not compared' iv_tr = 'Karşılaştırılmadı' ).
-      CONCATENATE lv_summary `: ` lv_skipped INTO lv_summary.
+      lv_summary = |{ lv_summary }: { lv_skipped }|.
       MESSAGE lv_summary TYPE 'S' DISPLAY LIKE 'W'.
     ENDLOOP.
 
@@ -2131,12 +1894,7 @@ CLASS lcl_app IMPLEMENTATION.
 
 
   METHOD on_link_click.
-    DATA lv_decision TYPE lif_dupl=>ty_decision_code.
-    DATA lx_error TYPE REF TO lcx_error.
-    DATA lv_text TYPE string.
-    FIELD-SYMBOLS <ls_row> TYPE ty_row.
-
-    READ TABLE gt_rows INDEX row ASSIGNING <ls_row>.
+    READ TABLE gt_rows INDEX row ASSIGNING FIELD-SYMBOL(<ls_row>).
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.
@@ -2145,7 +1903,7 @@ CLASS lcl_app IMPLEMENTATION.
     ENDIF.
     CASE column.
       WHEN 'MARK_DUP'.
-        lv_decision = lif_dupl=>decision-duplicate.
+        DATA(lv_decision) = lif_dupl=>decision-duplicate.
       WHEN 'MARK_NOT'.
         lv_decision = lif_dupl=>decision-not_duplicate.
       WHEN OTHERS.
@@ -2155,14 +1913,14 @@ CLASS lcl_app IMPLEMENTATION.
         lcl_decisions=>save( iv_partner1 = <ls_row>-partner1
                              iv_partner2 = <ls_row>-partner2
                              iv_decision = lv_decision ).
-      CATCH lcx_error INTO lx_error.
-        lv_text = lx_error->get_text( ).
+      CATCH lcx_error INTO DATA(lx_error).
+        DATA(lv_text) = lx_error->get_text( ).
         MESSAGE lv_text TYPE 'I' DISPLAY LIKE 'E'.
         RETURN.
     ENDTRY.
     <ls_row>-decision = lv_decision.
     lv_text = lcl_text=>get( iv_en = 'Saved' iv_tr = 'Kaydedildi' ).
-    CONCATENATE lv_text `: ` <ls_row>-partner1 ` / ` <ls_row>-partner2 ` = ` lv_decision INTO lv_text.
+    lv_text = |{ lv_text }: { <ls_row>-partner1 } / { <ls_row>-partner2 } = { lv_decision }|.
     MESSAGE lv_text TYPE 'S'.
     go_alv->refresh( ).
   ENDMETHOD.
@@ -2185,8 +1943,7 @@ CLASS lcl_app IMPLEMENTATION.
 
 
   METHOD hotspot.
-    DATA lo_column TYPE REF TO cl_salv_column_table.
-    lo_column ?= io_columns->get_column( iv_column ).
+    DATA(lo_column) = CAST cl_salv_column_table( io_columns->get_column( iv_column ) ).
     lo_column->set_cell_type( if_salv_c_cell_type=>hotspot ).
     lo_column->set_icon( abap_true ).
   ENDMETHOD.
@@ -2217,13 +1974,14 @@ ENDCLASS.
 CLASS lcl_screen IMPLEMENTATION.
 
   METHOD settings.
-    DATA lv_word TYPE string.
-    DATA ls_stop LIKE LINE OF s_stop.
+
 
     rs_settings-tax_type = p_taxty.
     rs_settings-bp_role = p_role.
     rs_settings-bp_group = p_group.
     rs_settings-country = p_cntry.
+    rs_settings-key_date = p_keydt.
+    rs_settings-tax_check = p_taxchk.
     rs_settings-threshold = p_thresh.
     rs_settings-max_block = p_maxblk.
     rs_settings-unmask = p_unmask.
@@ -2234,8 +1992,8 @@ CLASS lcl_screen IMPLEMENTATION.
     add_rule( EXPORTING iv_rule = lif_dupl=>rule-address iv_weight = p_waddr  CHANGING ct_rules = rs_settings-rules ).
     add_rule( EXPORTING iv_rule = lif_dupl=>rule-phone   iv_weight = p_wphone CHANGING ct_rules = rs_settings-rules ).
     add_rule( EXPORTING iv_rule = lif_dupl=>rule-email   iv_weight = p_wmail  CHANGING ct_rules = rs_settings-rules ).
-    LOOP AT s_stop INTO ls_stop WHERE sign = 'I' AND option = 'EQ'.
-      lv_word = ls_stop-low.
+    LOOP AT s_stop INTO DATA(ls_stop) WHERE sign = 'I' AND option = 'EQ'.
+      DATA(lv_word) = ls_stop-low.
       APPEND lv_word TO rs_settings-stop_words.
     ENDLOOP.
   ENDMETHOD.
@@ -2256,12 +2014,12 @@ ENDCLASS.
 *& Unit tests (in ADT: Ctrl+Shift+F10; in SE38: Program > Execute >
 *& Unit Tests). All names, numbers and addresses are made up; check
 *& digits of the test numbers were calculated separately.
-*& Written for ABAP 7.00: risk level and duration are pseudo comments,
-*& and every result is put into a variable before it is checked.
+*& Tests use in-memory fixtures; SAP authorization, SQL and UI acceptance
+*& must also be checked in the target system.
 *&---------------------------------------------------------------------*
-CLASS ltc_tax_id DEFINITION FINAL FOR TESTING.
-  "#AU Risk_Level Harmless
-  "#AU Duration Short
+CLASS ltc_tax_id DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+
   PRIVATE SECTION.
     METHODS vkn_valid FOR TESTING.
     METHODS vkn_wrong_check_digit FOR TESTING.
@@ -2290,23 +2048,23 @@ ENDCLASS.
 CLASS ltc_tax_id IMPLEMENTATION.
 
   METHOD vkn.
-    DATA lv_valid TYPE abap_bool.
-    lv_valid = lcl_tax_id=>is_valid_vkn( iv_number ).
-    cl_aunit_assert=>assert_equals( act = lv_valid exp = iv_valid msg = iv_number ).
+
+    DATA(lv_valid) = lcl_tax_id=>is_valid_vkn( iv_number ).
+    cl_abap_unit_assert=>assert_equals( act = lv_valid exp = iv_valid msg = iv_number ).
   ENDMETHOD.
 
 
   METHOD tckn.
-    DATA lv_valid TYPE abap_bool.
-    lv_valid = lcl_tax_id=>is_valid_tckn( iv_number ).
-    cl_aunit_assert=>assert_equals( act = lv_valid exp = iv_valid msg = iv_number ).
+
+    DATA(lv_valid) = lcl_tax_id=>is_valid_tckn( iv_number ).
+    cl_abap_unit_assert=>assert_equals( act = lv_valid exp = iv_valid msg = iv_number ).
   ENDMETHOD.
 
 
   METHOD problem.
-    DATA lv_problem TYPE string.
-    lv_problem = lcl_tax_id=>check( iv_number ).
-    cl_aunit_assert=>assert_equals( act = lv_problem exp = iv_problem msg = iv_number ).
+
+    DATA(lv_problem) = lcl_tax_id=>check( iv_number ).
+    cl_abap_unit_assert=>assert_equals( act = lv_problem exp = iv_problem msg = iv_number ).
   ENDMETHOD.
 
 
@@ -2345,17 +2103,15 @@ CLASS ltc_tax_id IMPLEMENTATION.
 
 
   METHOD mask.
-    DATA lv_masked TYPE string.
-    lv_masked = lcl_tax_id=>mask( '10000000146' ).
-    cl_aunit_assert=>assert_equals( act = lv_masked exp = `100******46` ).
+
+    DATA(lv_masked) = lcl_tax_id=>mask( '10000000146' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_masked exp = `100******46` ).
   ENDMETHOD.
 
 ENDCLASS.
 
 
-CLASS ltc_normalizer DEFINITION FINAL FOR TESTING.
-  "#AU Risk_Level Harmless
-  "#AU Duration Short
+CLASS ltc_normalizer DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     DATA mo_cut TYPE REF TO lcl_normalizer.
 
@@ -2368,6 +2124,8 @@ CLASS ltc_normalizer DEFINITION FINAL FOR TESTING.
     METHODS phone FOR TESTING.
     METHODS email FOR TESTING.
     METHODS address FOR TESTING.
+    METHODS address_requires_street FOR TESTING.
+    METHODS tax_id_keeps_letters FOR TESTING.
 
     METHODS simple
       IMPORTING
@@ -2394,34 +2152,25 @@ ENDCLASS.
 CLASS ltc_normalizer IMPLEMENTATION.
 
   METHOD setup.
-    CREATE OBJECT mo_cut.
+    mo_cut = NEW #( ).
   ENDMETHOD.
 
 
   METHOD simple.
-    DATA lv_text TYPE string.
-    lv_text = mo_cut->simplify( iv_text ).
-    cl_aunit_assert=>assert_equals( act = lv_text exp = iv_expected ).
+    cl_abap_unit_assert=>assert_equals( act = mo_cut->simplify( iv_text ) exp = iv_expected ).
   ENDMETHOD.
 
 
   METHOD tokens.
-    DATA lt_tokens TYPE lif_dupl=>ty_strings.
-    DATA lv_tokens TYPE string.
-    lt_tokens = mo_cut->name_tokens( iv_name ).
-    CONCATENATE LINES OF lt_tokens INTO lv_tokens SEPARATED BY space.
-    cl_aunit_assert=>assert_equals( act = lv_tokens exp = iv_expected msg = iv_name ).
+    DATA(lt_tokens) = mo_cut->name_tokens( iv_name ).
+    cl_abap_unit_assert=>assert_equals( act = concat_lines_of( table = lt_tokens sep = space )
+                                      exp = iv_expected msg = iv_name ).
   ENDMETHOD.
 
 
   METHOD address_key.
-    DATA ls_address TYPE lif_dupl=>ty_address.
-    ls_address-country = 'TR'.
-    ls_address-post_code = iv_post_code.
-    ls_address-city = iv_city.
-    ls_address-street = iv_street.
-    ls_address-house_no = iv_house_no.
-    rv_key = mo_cut->address_key( ls_address ).
+    rv_key = mo_cut->address_key( VALUE #( country = 'TR' post_code = iv_post_code city = iv_city
+                                          street = iv_street house_no = iv_house_no ) ).
   ENDMETHOD.
 
 
@@ -2450,64 +2199,66 @@ CLASS ltc_normalizer IMPLEMENTATION.
 
 
   METHOD extra_stop_words.
-    " Extra words are ignored together with the built-in ones
-    DATA lt_extra TYPE lif_dupl=>ty_strings.
-    APPEND `Holding` TO lt_extra.
-    CREATE OBJECT mo_cut
-      EXPORTING
-        it_extra_words = lt_extra.
+    mo_cut = NEW #( it_extra_words = VALUE #( ( `Holding` ) ) ).
     tokens( iv_name = `Derya Holding Ltd.` iv_expected = `DERYA` ).
   ENDMETHOD.
 
 
   METHOD phone.
-    DATA lv_key TYPE string.
-    lv_key = mo_cut->phone_key( '+90 (212) 555 01 02' ).
-    cl_aunit_assert=>assert_equals( act = lv_key exp = `2125550102` ).
+
+    DATA(lv_key) = mo_cut->phone_key( '+90 (212) 555 01 02' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_key exp = `2125550102` ).
     lv_key = mo_cut->phone_key( '0212 555 0102' ).
-    cl_aunit_assert=>assert_equals( act = lv_key exp = `2125550102` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_key exp = `2125550102` ).
     lv_key = mo_cut->phone_key( '1234' ).
-    cl_aunit_assert=>assert_initial( lv_key ).
+    cl_abap_unit_assert=>assert_initial( lv_key ).
   ENDMETHOD.
 
 
   METHOD email.
-    DATA lv_key TYPE string.
-    lv_key = mo_cut->email_key( ` Info@Derya.com.tr ` ).
-    cl_aunit_assert=>assert_equals( act = lv_key exp = `info@derya.com.tr` ).
+
+    DATA(lv_key) = mo_cut->email_key( ` Info@Derya.com.tr ` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_key exp = `info@derya.com.tr` ).
     lv_key = mo_cut->email_domain( 'satis@derya.com.tr' ).
-    cl_aunit_assert=>assert_equals( act = lv_key exp = `derya.com.tr` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_key exp = `derya.com.tr` ).
     lv_key = mo_cut->email_domain( 'derya.tekstil@gmail.com' ).
-    cl_aunit_assert=>assert_initial( lv_key ).
+    cl_abap_unit_assert=>assert_initial( lv_key ).
     lv_key = mo_cut->email_key( 'no address' ).
-    cl_aunit_assert=>assert_initial( lv_key ).
+    cl_abap_unit_assert=>assert_initial( lv_key ).
   ENDMETHOD.
 
 
   METHOD address.
-    DATA lv_key TYPE string.
-    DATA lv_other TYPE string.
 
-    lv_key = address_key( iv_post_code = `34000` iv_city = `İstanbul` iv_street = `Atatürk Cad.` iv_house_no = `12/3` ).
-    cl_aunit_assert=>assert_equals( act = lv_key exp = `TR/34000/ATATURK CD 12 3` ).
+
+    DATA(lv_key) = address_key( iv_post_code = `34000` iv_city = `İstanbul` iv_street = `Atatürk Cad.` iv_house_no = `12/3` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_key exp = `TR/34000/ATATURK CD 12 3` ).
     " Street words written out or abbreviated give the same key
-    lv_other = address_key( iv_post_code = `34000` iv_street = `ATATURK CADDESI No: 12/3` ).
-    cl_aunit_assert=>assert_equals( act = lv_other exp = lv_key ).
+    DATA(lv_other) = address_key( iv_post_code = `34000` iv_street = `ATATURK CADDESI No: 12/3` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_other exp = lv_key ).
     lv_key = address_key( iv_post_code = `06000` iv_street = `Lale Sok.` iv_house_no = `7` ).
     lv_other = address_key( iv_post_code = `06000` iv_street = `Lale Sokağı` iv_house_no = `7` ).
-    cl_aunit_assert=>assert_equals( act = lv_other exp = lv_key ).
+    cl_abap_unit_assert=>assert_equals( act = lv_other exp = lv_key ).
     lv_key = address_key( iv_city = `İzmir` iv_street = `Kordon` ).
-    cl_aunit_assert=>assert_equals( act = lv_key exp = `TR/IZMIR/KORDON` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_key exp = `TR/IZMIR/KORDON` ).
     lv_key = address_key( iv_city = `İzmir` ).
-    cl_aunit_assert=>assert_initial( lv_key ).
+    cl_abap_unit_assert=>assert_initial( lv_key ).
+  ENDMETHOD.
+
+  METHOD address_requires_street.
+    cl_abap_unit_assert=>assert_initial( address_key( iv_post_code = `34000` iv_house_no = `12` ) ).
+    cl_abap_unit_assert=>assert_initial( address_key( iv_post_code = `34000` iv_street = `...` iv_house_no = `12` ) ).
+  ENDMETHOD.
+
+  METHOD tax_id_keeps_letters.
+    cl_abap_unit_assert=>assert_equals( act = mo_cut->tax_key( `ab-123` ) exp = `AB123` ).
+    cl_abap_unit_assert=>assert_equals( act = mo_cut->tax_key( `XY 123` ) exp = `XY123` ).
   ENDMETHOD.
 
 ENDCLASS.
 
 
-CLASS ltc_matcher DEFINITION FINAL FOR TESTING.
-  "#AU Risk_Level Harmless
-  "#AU Duration Short
+CLASS ltc_matcher DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     DATA mo_cut TYPE REF TO lcl_matcher.
     DATA mt_partners TYPE lif_dupl=>ty_partners.
@@ -2528,6 +2279,10 @@ CLASS ltc_matcher DEFINITION FINAL FOR TESTING.
     METHODS pair_order FOR TESTING.
     METHODS similarity_values FOR TESTING.
     METHODS edit_distance FOR TESTING.
+    METHODS block_members_bounded FOR TESTING.
+    METHODS missing_street_not_evidence FOR TESTING.
+    METHODS tax_id_letters_distinguish FOR TESTING.
+    METHODS formatted_tax_id_matches FOR TESTING.
 
     "! Adds a made-up partner to MT_PARTNERS
     METHODS partner
@@ -2561,19 +2316,14 @@ ENDCLASS.
 CLASS ltc_matcher IMPLEMENTATION.
 
   METHOD setup.
-    CREATE OBJECT mo_cut
-      EXPORTING
-        iv_unmask = abap_true.
+    mo_cut = NEW #(
+        iv_unmask = abap_true ).
     CLEAR mt_partners.
   ENDMETHOD.
 
 
   METHOD partner.
-    DATA ls_partner TYPE lif_dupl=>ty_partner.
-    DATA ls_address TYPE lif_dupl=>ty_address.
-
-    ls_partner-partner = iv_id.
-    ls_partner-name = iv_name.
+    DATA(ls_partner) = VALUE lif_dupl=>ty_partner( partner = iv_id name = iv_name ).
     IF iv_tax IS NOT INITIAL.
       APPEND iv_tax TO ls_partner-tax_ids.
     ENDIF.
@@ -2581,11 +2331,8 @@ CLASS ltc_matcher IMPLEMENTATION.
       APPEND iv_iban TO ls_partner-ibans.
     ENDIF.
     IF iv_street IS NOT INITIAL.
-      ls_address-country = 'TR'.
-      ls_address-post_code = `34000`.
-      ls_address-city = `Istanbul`.
-      ls_address-street = iv_street.
-      APPEND ls_address TO ls_partner-addresses.
+      APPEND VALUE #( country = 'TR' post_code = `34000` city = `Istanbul` street = iv_street )
+        TO ls_partner-addresses.
     ENDIF.
     IF iv_phone IS NOT INITIAL.
       APPEND iv_phone TO ls_partner-phones.
@@ -2608,7 +2355,7 @@ CLASS ltc_matcher IMPLEMENTATION.
   METHOD similarity.
     DATA lt_tokens1 TYPE lif_dupl=>ty_strings.
     DATA lt_tokens2 TYPE lif_dupl=>ty_strings.
-    DATA lv_percent TYPE i.
+
 
     IF iv_words1 IS NOT INITIAL.
       SPLIT iv_words1 AT space INTO TABLE lt_tokens1.
@@ -2616,15 +2363,15 @@ CLASS ltc_matcher IMPLEMENTATION.
     IF iv_words2 IS NOT INITIAL.
       SPLIT iv_words2 AT space INTO TABLE lt_tokens2.
     ENDIF.
-    lv_percent = mo_cut->similarity( it_tokens1 = lt_tokens1 it_tokens2 = lt_tokens2 ).
-    cl_aunit_assert=>assert_equals( act = lv_percent exp = iv_expected ).
+    DATA(lv_percent) = mo_cut->similarity( it_tokens1 = lt_tokens1 it_tokens2 = lt_tokens2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_percent exp = iv_expected ).
   ENDMETHOD.
 
 
   METHOD distance.
-    DATA lv_distance TYPE i.
-    lv_distance = lcl_matcher=>edit_distance( iv_text1 = iv_text1 iv_text2 = iv_text2 ).
-    cl_aunit_assert=>assert_equals( act = lv_distance exp = iv_expected ).
+
+    DATA(lv_distance) = lcl_matcher=>edit_distance( iv_text1 = iv_text1 iv_text2 = iv_text2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_distance exp = iv_expected ).
   ENDMETHOD.
 
 
@@ -2632,18 +2379,18 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '1' iv_name = `Derya Tekstil A.Ş.` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Mavi Gıda Ltd.` iv_tax = `1234567890` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = mv_lines exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 95 ).
-    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same tax number 1234567890` ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 95 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-reasons exp = `Same tax number 1234567890` ).
   ENDMETHOD.
 
 
   METHOD tax_number_masked.
-    CREATE OBJECT mo_cut.
+    mo_cut = NEW #( ).
     partner( iv_id = '1' iv_name = `Ali Veli` iv_tax = `10000000146` ).
     partner( iv_id = '2' iv_name = `Ayşe Kaya` iv_tax = `10000000146` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same tax number 100******46` ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-reasons exp = `Same tax number 100******46` ).
   ENDMETHOD.
 
 
@@ -2651,8 +2398,8 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '1' iv_name = `Derya Tekstil San. ve Tic. A.Ş.` ).
     partner( iv_id = '2' iv_name = `DERYA TEKSTİL SANAYİ TİCARET ANONİM ŞİRKETİ` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 70 ).
-    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same name` ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 70 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-reasons exp = `Same name` ).
   ENDMETHOD.
 
 
@@ -2660,9 +2407,9 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '1' iv_name = `Derya Tekstil A.Ş.` ).
     partner( iv_id = '2' iv_name = `Deria Tekstil AŞ` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = mv_lines exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Name 92% similar` ).
-    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 64 ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-reasons exp = `Name 92% similar` ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 64 ).
   ENDMETHOD.
 
 
@@ -2670,7 +2417,7 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '1' iv_name = `Derya Tekstil A.Ş.` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Derya Gıda A.Ş.` iv_tax = `9876543217` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = mv_lines exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 0 ).
   ENDMETHOD.
 
 
@@ -2679,41 +2426,32 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '1' iv_name = `Kuzey Lojistik` iv_street = `Atatürk Cad. 12` iv_phone = `0212 555 01 02` ).
     partner( iv_id = '2' iv_name = `Güney Nakliyat` iv_street = `ATATURK CAD 12` iv_phone = `+90 212 5550102` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 70 ).
-    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same address; Same phone` ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 70 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-reasons exp = `Same address; Same phone` ).
   ENDMETHOD.
 
 
   METHOD public_mail_domain_ignored.
-    CREATE OBJECT mo_cut
-      EXPORTING
-        iv_threshold = 1.
+    mo_cut = NEW #(
+        iv_threshold = 1 ).
     partner( iv_id = '1' iv_name = `Kuzey Lojistik` iv_email = `kuzey@gmail.com` ).
     partner( iv_id = '2' iv_name = `Güney Nakliyat` iv_email = `guney@gmail.com` ).
     partner( iv_id = '3' iv_name = `Batı Ticaret` iv_email = `satis@bati.com.tr` ).
     partner( iv_id = '4' iv_name = `Doğu Pazarlama` iv_email = `info@bati.com.tr` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = mv_lines exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = ms_line-partner1 exp = '3' ).
-    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same e-mail domain bati.com.tr` ).
-    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 20 ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-partner1 exp = '3' ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-reasons exp = `Same e-mail domain bati.com.tr` ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 20 ).
   ENDMETHOD.
 
 
   METHOD rule_switched_off.
-    DATA lt_rules TYPE lif_dupl=>ty_rule_settings.
-    DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
-
-    ls_rule-rule = lif_dupl=>rule-tax_id.
-    ls_rule-weight = 0.
-    INSERT ls_rule INTO TABLE lt_rules.
-    CREATE OBJECT mo_cut
-      EXPORTING
-        it_rules = lt_rules.
+    mo_cut = NEW #( it_rules = VALUE #( ( rule = lif_dupl=>rule-tax_id weight = 0 ) ) ).
     partner( iv_id = '1' iv_name = `Derya Tekstil` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Mavi Gıda` iv_tax = `1234567890` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = mv_lines exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 0 ).
   ENDMETHOD.
 
 
@@ -2721,19 +2459,18 @@ CLASS ltc_matcher IMPLEMENTATION.
     DATA lv_skipped TYPE string.
     DATA lv_count TYPE i.
 
-    CREATE OBJECT mo_cut
-      EXPORTING
+    mo_cut = NEW #(
         iv_max_block = 2
-        iv_unmask    = abap_true.
+        iv_unmask    = abap_true ).
     partner( iv_id = '1' iv_name = `Alfa` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Beta` iv_tax = `1234567890` ).
     partner( iv_id = '3' iv_name = `Gama` iv_tax = `1234567890` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = mv_lines exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 0 ).
     lv_count = lines( ms_result-skipped_blocks ).
-    cl_aunit_assert=>assert_equals( act = lv_count exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
     READ TABLE ms_result-skipped_blocks INDEX 1 INTO lv_skipped.
-    cl_aunit_assert=>assert_equals( act = lv_skipped exp = `Tax number 1234567890 (3 partners, not compared)` ).
+    cl_abap_unit_assert=>assert_equals( act = lv_skipped exp = `Tax number 1234567890 (3 partners, not compared)` ).
   ENDMETHOD.
 
 
@@ -2741,9 +2478,9 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '9' iv_name = `Zeta` iv_iban = `TR33 0006 1005 1978 6457 8413 26` ).
     partner( iv_id = '4' iv_name = `Eta` iv_iban = `TR330006100519786457841326` ).
     find( ).
-    cl_aunit_assert=>assert_equals( act = ms_line-partner1 exp = '4' ).
-    cl_aunit_assert=>assert_equals( act = ms_line-partner2 exp = '9' ).
-    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 90 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-partner1 exp = '4' ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-partner2 exp = '9' ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 90 ).
   ENDMETHOD.
 
 
@@ -2762,17 +2499,62 @@ CLASS ltc_matcher IMPLEMENTATION.
     distance( iv_text1 = `ABC` iv_text2 = `ABC` iv_expected = 0 ).
   ENDMETHOD.
 
+  METHOD block_members_bounded.
+    mo_cut = NEW #( iv_max_block = 2 ).
+    DATA lt_blocks TYPE lcl_matcher=>ty_blocks.
+    DO 1000 TIMES.
+      DATA(lv_index) = sy-index.
+      mo_cut->add_key( EXPORTING iv_prefix = 'W' iv_value = `TEKSTIL` iv_index = lv_index
+                       CHANGING ct_blocks = lt_blocks ).
+      mo_cut->add_key( EXPORTING iv_prefix = 'W' iv_value = `TEKSTIL` iv_index = lv_index
+                       CHANGING ct_blocks = lt_blocks ).
+    ENDDO.
+    DATA(ls_block) = lt_blocks[ key = `W:TEKSTIL` ].
+    cl_abap_unit_assert=>assert_equals( act = ls_block-member_count exp = 1000 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_block-members ) exp = 3 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_block-members[ 3 ] exp = 3 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_block-last_index exp = 1000 ).
+  ENDMETHOD.
+
+  METHOD missing_street_not_evidence.
+    DATA(ls_address) = VALUE lif_dupl=>ty_address( country = 'TR' post_code = `34000` house_no = `12` ).
+    DATA(ls_one) = VALUE lif_dupl=>ty_partner( partner = '1' name = `Kuzey Lojistik`
+      addresses = VALUE #( ( ls_address ) ) phones = VALUE #( ( `0212 555 01 02` ) ) ).
+    DATA(ls_two) = VALUE lif_dupl=>ty_partner( partner = '2' name = `Guney Nakliyat`
+      addresses = VALUE #( ( ls_address ) ) phones = VALUE #( ( `+90 212 5550102` ) ) ).
+    ms_result = mo_cut->find( VALUE #( ( ls_one ) ( ls_two ) ) ).
+    cl_abap_unit_assert=>assert_initial( ms_result-lines ).
+  ENDMETHOD.
+
+  METHOD tax_id_letters_distinguish.
+    partner( iv_id = '1' iv_name = `Alfa` iv_tax = `AB123` ).
+    partner( iv_id = '2' iv_name = `Beta` iv_tax = `XY123` ).
+    find( ).
+    cl_abap_unit_assert=>assert_initial( ms_result-lines ).
+  ENDMETHOD.
+
+  METHOD formatted_tax_id_matches.
+    partner( iv_id = '1' iv_name = `Alfa` iv_tax = `AB-123` ).
+    partner( iv_id = '2' iv_name = `Beta` iv_tax = `AB 123` ).
+    find( ).
+    cl_abap_unit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ms_line-score exp = 95 ).
+  ENDMETHOD.
+
 ENDCLASS.
 
 
-CLASS ltc_finder DEFINITION FINAL FOR TESTING.
-  "#AU Risk_Level Harmless
-  "#AU Duration Short
+CLASS ltc_finder DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+
+
   PRIVATE SECTION.
     METHODS not_duplicate_hidden FOR TESTING.
     METHODS decided_pairs_shown FOR TESTING.
     METHODS invalid_tax_ids FOR TESTING.
     METHODS settings_checked FOR TESTING.
+    METHODS tax_check_is_opt_in FOR TESTING.
+    METHODS foreign_country_checked FOR TESTING.
+    METHODS reference_date_required FOR TESTING.
 
     METHODS result
       RETURNING
@@ -2827,13 +2609,13 @@ CLASS ltc_finder IMPLEMENTATION.
 
   METHOD refused.
     DATA lv_problem TYPE string.
-    DATA lv_refused TYPE abap_bool.
+
 
     lv_problem = lcl_app=>check_settings( is_settings ).
     IF lv_problem IS NOT INITIAL.
-      lv_refused = abap_true.
+      DATA(lv_refused) = abap_true.
     ENDIF.
-    cl_aunit_assert=>assert_equals( act = lv_refused exp = iv_refused msg = lv_problem ).
+    cl_abap_unit_assert=>assert_equals( act = lv_refused exp = iv_refused msg = lv_problem ).
   ENDMETHOD.
 
 
@@ -2848,12 +2630,12 @@ CLASS ltc_finder IMPLEMENTATION.
     lcl_finder=>apply_decisions( EXPORTING it_decisions = lt_decisions iv_show_decided = abap_false
                                  CHANGING  cs_result    = ls_result ).
     lv_lines = lines( ls_result-lines ).
-    cl_aunit_assert=>assert_equals( act = lv_lines exp = 2 ).
-    cl_aunit_assert=>assert_equals( act = ls_result-hidden_pairs exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_lines exp = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-hidden_pairs exp = 1 ).
     READ TABLE ls_result-lines INDEX 1 INTO ls_line.
-    cl_aunit_assert=>assert_equals( act = ls_line-decision exp = lif_dupl=>decision-duplicate ).
+    cl_abap_unit_assert=>assert_equals( act = ls_line-decision exp = lif_dupl=>decision-duplicate ).
     READ TABLE ls_result-lines INDEX 2 INTO ls_line.
-    cl_aunit_assert=>assert_initial( ls_line-decision ).
+    cl_abap_unit_assert=>assert_initial( ls_line-decision ).
   ENDMETHOD.
 
 
@@ -2868,10 +2650,10 @@ CLASS ltc_finder IMPLEMENTATION.
     lcl_finder=>apply_decisions( EXPORTING it_decisions = lt_decisions iv_show_decided = abap_true
                                  CHANGING  cs_result    = ls_result ).
     lv_lines = lines( ls_result-lines ).
-    cl_aunit_assert=>assert_equals( act = lv_lines exp = 3 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_lines exp = 3 ).
     READ TABLE ls_result-lines INDEX 2 INTO ls_line.
-    cl_aunit_assert=>assert_equals( act = ls_line-decision exp = lif_dupl=>decision-not_duplicate ).
-    cl_aunit_assert=>assert_initial( ls_result-hidden_pairs ).
+    cl_abap_unit_assert=>assert_equals( act = ls_line-decision exp = lif_dupl=>decision-not_duplicate ).
+    cl_abap_unit_assert=>assert_initial( ls_result-hidden_pairs ).
   ENDMETHOD.
 
 
@@ -2892,19 +2674,19 @@ CLASS ltc_finder IMPLEMENTATION.
     APPEND `1234567890` TO ls_partner-tax_ids.
     APPEND ls_partner TO lt_partners.
 
-    lcl_finder=>add_tax_id_findings( EXPORTING it_partners = lt_partners iv_unmask = abap_false
+    lcl_finder=>add_tax_id_findings( EXPORTING it_partners = lt_partners iv_unmask = abap_false iv_check = abap_true
                                      CHANGING  cs_result   = ls_result ).
     lv_lines = lines( ls_result-lines ).
-    cl_aunit_assert=>assert_equals( act = lv_lines exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_lines exp = 1 ).
     READ TABLE ls_result-lines INDEX 1 INTO ls_line.
-    cl_aunit_assert=>assert_equals( act = ls_line-finding exp = lif_dupl=>finding-invalid_tax_id ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons
+    cl_abap_unit_assert=>assert_equals( act = ls_line-finding exp = lif_dupl=>finding-invalid_tax_id ).
+    cl_abap_unit_assert=>assert_equals( act = ls_line-reasons
                                     exp = `Tax number (VKN) 123*****91: check digit is wrong` ).
     CLEAR ls_result.
-    lcl_finder=>add_tax_id_findings( EXPORTING it_partners = lt_partners iv_unmask = abap_true
+    lcl_finder=>add_tax_id_findings( EXPORTING it_partners = lt_partners iv_unmask = abap_true iv_check = abap_true
                                      CHANGING  cs_result   = ls_result ).
     READ TABLE ls_result-lines INDEX 1 INTO ls_line.
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons
+    cl_abap_unit_assert=>assert_equals( act = ls_line-reasons
                                     exp = `Tax number (VKN) 1234567891: check digit is wrong` ).
   ENDMETHOD.
 
@@ -2914,6 +2696,7 @@ CLASS ltc_finder IMPLEMENTATION.
     FIELD-SYMBOLS <ls_rule> TYPE lif_dupl=>ty_rule_setting.
 
     ls_settings-tax_type = 'TR2'.
+    ls_settings-key_date = '20261102'.
     ls_settings-threshold = 60.
     ls_settings-max_block = 200.
     ls_settings-rules = lcl_matcher=>default_rules( ).
@@ -2929,6 +2712,38 @@ CLASS ltc_finder IMPLEMENTATION.
     refused( is_settings = ls_settings iv_refused = abap_true ).
   ENDMETHOD.
 
+  METHOD tax_check_is_opt_in.
+    DATA(partners) = VALUE lif_dupl=>ty_partners(
+      ( partner = '1' name = `Foreign partner` tax_ids = VALUE #( ( `123456789` ) ) ) ).
+    DATA result TYPE lif_dupl=>ty_result.
+    lcl_finder=>add_tax_id_findings( EXPORTING it_partners = partners iv_unmask = abap_false
+                                    CHANGING cs_result = result ).
+    cl_abap_unit_assert=>assert_initial( result-lines ).
+    lcl_finder=>add_tax_id_findings( EXPORTING it_partners = partners iv_unmask = abap_false iv_check = abap_true
+                                    CHANGING cs_result = result ).
+    cl_abap_unit_assert=>assert_equals( act = lines( result-lines ) exp = 1 ).
+  ENDMETHOD.
+
+  METHOD foreign_country_checked.
+    DATA(settings) = VALUE lif_dupl=>ty_settings(
+      key_date = '20261102' tax_type = 'US1' country = 'US' tax_check = abap_true
+      threshold = 60 max_block = 200 rules = lcl_matcher=>default_rules( ) ).
+    refused( is_settings = settings iv_refused = abap_true ).
+    settings-tax_check = abap_false.
+    refused( is_settings = settings iv_refused = abap_false ).
+    settings-country = 'TR'.
+    settings-tax_check = abap_true.
+    CLEAR settings-tax_type.
+    settings-rules[ rule = lif_dupl=>rule-tax_id ]-weight = 0.
+    refused( is_settings = settings iv_refused = abap_true ).
+  ENDMETHOD.
+
+  METHOD reference_date_required.
+    DATA(settings) = VALUE lif_dupl=>ty_settings(
+      tax_type = 'TR2' threshold = 60 max_block = 200 rules = lcl_matcher=>default_rules( ) ).
+    refused( is_settings = settings iv_refused = abap_true ).
+  ENDMETHOD.
+
 ENDCLASS.
 
 
@@ -2939,6 +2754,13 @@ INITIALIZATION.
   lcl_text=>set_selection_texts( ).
 
 AT SELECTION-SCREEN.
+  LOOP AT s_stop ASSIGNING FIELD-SYMBOL(<stop_word>).
+    IF <stop_word>-sign <> 'I' OR <stop_word>-option <> 'EQ'.
+      gv_problem = lcl_text=>get( iv_en = `Extra ignored words must be inclusive, exact values.`
+                                  iv_tr = `Ek yok sayılacak kelimeler dahil edilen tam değerler olmalı.` ).
+      MESSAGE gv_problem TYPE 'E'.
+    ENDIF.
+  ENDLOOP.
   gs_settings = lcl_screen=>settings( ).
   gv_problem = lcl_app=>check_settings( gs_settings ).
   IF gv_problem IS NOT INITIAL.

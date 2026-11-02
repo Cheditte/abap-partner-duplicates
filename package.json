@@ -1,0 +1,19 @@
+{
+  "name": "abap-partner-duplicates",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Development checks for the ABAP partner duplicate finder",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "lint:740": "node scripts/lint.mjs 740",
+    "lint:758": "node scripts/lint.mjs 758",
+    "test:logic": "node scripts/test-logic.mjs"
+  },
+  "devDependencies": {
+    "@abaplint/cli": "2.120.92",
+    "@abaplint/runtime": "2.14.15",
+    "@abaplint/transpiler-cli": "2.14.15"
+  }
+}
