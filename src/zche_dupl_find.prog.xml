@@ -18,15 +18,99 @@
     </item>
     <item>
      <ID>S</ID>
+     <KEY>P_CNTRY</KEY>
+     <ENTRY>Country (empty = all)</ENTRY>
+     <LENGTH>29</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
      <KEY>P_DECID</KEY>
      <ENTRY>Show decided pairs</ENTRY>
      <LENGTH>26</LENGTH>
     </item>
     <item>
      <ID>S</ID>
-     <KEY>P_PROF</KEY>
-     <ENTRY>Search profile</ENTRY>
-     <LENGTH>22</LENGTH>
+     <KEY>P_GROUP</KEY>
+     <ENTRY>BP grouping (empty = all)</ENTRY>
+     <LENGTH>33</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_MAXBLK</KEY>
+     <ENTRY>Max. partners per key</ENTRY>
+     <LENGTH>29</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_MINSIM</KEY>
+     <ENTRY>Name similar at least (%)</ENTRY>
+     <LENGTH>33</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_ROLE</KEY>
+     <ENTRY>BP role (empty = all)</ENTRY>
+     <LENGTH>29</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_TAXTY</KEY>
+     <ENTRY>Tax number category</ENTRY>
+     <LENGTH>27</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_THRESH</KEY>
+     <ENTRY>Show pairs from score</ENTRY>
+     <LENGTH>29</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_UNMASK</KEY>
+     <ENTRY>Show full tax numbers</ENTRY>
+     <LENGTH>29</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_WADDR</KEY>
+     <ENTRY>Weight: same address</ENTRY>
+     <LENGTH>28</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_WIBAN</KEY>
+     <ENTRY>Weight: same IBAN</ENTRY>
+     <LENGTH>25</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_WMAIL</KEY>
+     <ENTRY>Weight: same e-mail</ENTRY>
+     <LENGTH>27</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_WNAME</KEY>
+     <ENTRY>Weight: similar name</ENTRY>
+     <LENGTH>28</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_WPHONE</KEY>
+     <ENTRY>Weight: same phone</ENTRY>
+     <LENGTH>26</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_WTAX</KEY>
+     <ENTRY>Weight: same tax number</ENTRY>
+     <LENGTH>31</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>S_STOP</KEY>
+     <ENTRY>Extra words to ignore</ENTRY>
+     <LENGTH>29</LENGTH>
     </item>
    </TPOOL>
   </asx:values>
