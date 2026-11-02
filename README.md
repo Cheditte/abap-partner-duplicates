@@ -179,7 +179,7 @@ On an SAP ABAP Platform 2023 trial (SAP_BASIS 816), 2 November 2026, with 21 mad
 
 - The program activates on its own; it uses no dictionary objects or classes of its own.
 - 30 ABAP Unit tests pass: Turkish letters, legal forms, word order, street words, phones, e-mails, VKN/TCKN check digits, masking, edit distance, scoring, crowded keys, rules switched off, decisions, setting checks.
-- [abaplint](https://abaplint.org) 2.120 in 7.00 mode ([abaplint.json](abaplint.json)) finds no syntax that 7.00 lacks. Its one remaining message is that it does not know SAP's standard class `CX_STATIC_CHECK`, because no SAP dictionary is loaded.
+- [abaplint](https://abaplint.org) 2.120 in 7.00 mode ([abaplint.json](abaplint.json)) reports no issues. It knows a few standard SAP objects only through stand-ins in [.abaplint-deps](.abaplint-deps). abaplint does not catch everything that 7.00 lacks (for example method calls passed directly as parameters), so those rules were also checked by hand.
 - As a background job, the search found the 5 planted duplicate pairs plus one pair that follows from them (scores 64–99) and the 2 wrong tax numbers, and nothing else.
 - With a "not a duplicate" decision stored, the next run hid that pair (`1 pairs hidden`); with **Show decided pairs** and **Show full tax numbers** it was listed with `N` and full numbers.
 - A lowest score of 0 is refused before the job starts.

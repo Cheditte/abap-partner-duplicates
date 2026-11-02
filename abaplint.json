@@ -2,7 +2,12 @@
   "global": {
     "files": "/src/**/*.*"
   },
-  "dependencies": [],
+  "dependencies": [
+    {
+      "files": "/**/*.*",
+      "folder": "/.abaplint-deps"
+    }
+  ],
   "syntax": {
     "version": "v700",
     "errorNamespace": "^(Z|Y|LCL_|LIF_|LTC_|LCX_)"

@@ -167,6 +167,8 @@ INTERFACE lif_dupl.
     ty_decisions TYPE SORTED TABLE OF ty_decision WITH UNIQUE KEY partner1 partner2.
 ENDINTERFACE.
 
+DATA gs_settings TYPE lif_dupl=>ty_settings.
+
 
 *----------------------------------------------------------------------*
 * Error: the text says what is wrong and who can fix it
@@ -1111,6 +1113,7 @@ CLASS lcl_matcher IMPLEMENTATION.
     DATA lv_text2 TYPE string.
     DATA lv_longer TYPE i.
     DATA lv_by_edits TYPE i.
+    DATA lv_distance TYPE i.
     DATA lv_by_words TYPE i.
     DATA lv_shared TYPE i.
     DATA lv_all TYPE i.
@@ -1130,7 +1133,8 @@ CLASS lcl_matcher IMPLEMENTATION.
     IF strlen( lv_text2 ) > lv_longer.
       lv_longer = strlen( lv_text2 ).
     ENDIF.
-    lv_by_edits = 100 - 100 * edit_distance( iv_text1 = lv_text1 iv_text2 = lv_text2 ) / lv_longer.
+    lv_distance = edit_distance( iv_text1 = lv_text1 iv_text2 = lv_text2 ).
+    lv_by_edits = 100 - 100 * lv_distance / lv_longer.
 
     LOOP AT it_tokens1 INTO lv_token WHERE table_line IS NOT INITIAL.
       READ TABLE it_tokens2 WITH KEY table_line = lv_token TRANSPORTING NO FIELDS.
@@ -2252,7 +2256,8 @@ ENDCLASS.
 *& Unit tests (in ADT: Ctrl+Shift+F10; in SE38: Program > Execute >
 *& Unit Tests). All names, numbers and addresses are made up; check
 *& digits of the test numbers were calculated separately.
-*& Risk level and duration are pseudo comments, as ABAP 7.00 expects.
+*& Written for ABAP 7.00: risk level and duration are pseudo comments,
+*& and every result is put into a variable before it is checked.
 *&---------------------------------------------------------------------*
 CLASS ltc_tax_id DEFINITION FINAL FOR TESTING.
   "#AU Risk_Level Harmless
@@ -2264,49 +2269,85 @@ CLASS ltc_tax_id DEFINITION FINAL FOR TESTING.
     METHODS tckn_wrong FOR TESTING.
     METHODS check_texts FOR TESTING.
     METHODS mask FOR TESTING.
+
+    METHODS vkn
+      IMPORTING
+        iv_number TYPE string
+        iv_valid  TYPE abap_bool.
+
+    METHODS tckn
+      IMPORTING
+        iv_number TYPE string
+        iv_valid  TYPE abap_bool.
+
+    METHODS problem
+      IMPORTING
+        iv_number  TYPE string
+        iv_problem TYPE string.
 ENDCLASS.
 
 
 CLASS ltc_tax_id IMPLEMENTATION.
 
+  METHOD vkn.
+    DATA lv_valid TYPE abap_bool.
+    lv_valid = lcl_tax_id=>is_valid_vkn( iv_number ).
+    cl_aunit_assert=>assert_equals( act = lv_valid exp = iv_valid msg = iv_number ).
+  ENDMETHOD.
+
+
+  METHOD tckn.
+    DATA lv_valid TYPE abap_bool.
+    lv_valid = lcl_tax_id=>is_valid_tckn( iv_number ).
+    cl_aunit_assert=>assert_equals( act = lv_valid exp = iv_valid msg = iv_number ).
+  ENDMETHOD.
+
+
+  METHOD problem.
+    DATA lv_problem TYPE string.
+    lv_problem = lcl_tax_id=>check( iv_number ).
+    cl_aunit_assert=>assert_equals( act = lv_problem exp = iv_problem msg = iv_number ).
+  ENDMETHOD.
+
+
   METHOD vkn_valid.
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_vkn( '1234567890' ) exp = abap_true ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_vkn( '9876543217' ) exp = abap_true ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_vkn( '5550001112' ) exp = abap_true ).
+    vkn( iv_number = `1234567890` iv_valid = abap_true ).
+    vkn( iv_number = `9876543217` iv_valid = abap_true ).
+    vkn( iv_number = `5550001112` iv_valid = abap_true ).
   ENDMETHOD.
 
 
   METHOD vkn_wrong_check_digit.
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_vkn( '1234567891' ) exp = abap_false ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_vkn( '123456789' ) exp = abap_false ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_vkn( '12345678A0' ) exp = abap_false ).
+    vkn( iv_number = `1234567891` iv_valid = abap_false ).
+    vkn( iv_number = `123456789` iv_valid = abap_false ).
+    vkn( iv_number = `12345678A0` iv_valid = abap_false ).
   ENDMETHOD.
 
 
   METHOD tckn_valid.
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_tckn( '10000000146' ) exp = abap_true ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_tckn( '12345678950' ) exp = abap_true ).
+    tckn( iv_number = `10000000146` iv_valid = abap_true ).
+    tckn( iv_number = `12345678950` iv_valid = abap_true ).
   ENDMETHOD.
 
 
   METHOD tckn_wrong.
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_tckn( '10000000147' ) exp = abap_false ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>is_valid_tckn( '01234567890' ) exp = abap_false ).
+    tckn( iv_number = `10000000147` iv_valid = abap_false ).
+    tckn( iv_number = `01234567890` iv_valid = abap_false ).
   ENDMETHOD.
 
 
   METHOD check_texts.
-    cl_aunit_assert=>assert_initial( lcl_tax_id=>check( '1234567890' ) ).
-    cl_aunit_assert=>assert_initial( lcl_tax_id=>check( ` 10000000146 ` ) ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>check( '1234567891' )
-                                    exp = `Tax number (VKN) 123*****91: check digit is wrong` ).
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>check( '12345' )
-                                    exp = `Tax number ***** has 5 digits; VKN has 10, TCKN 11` ).
+    problem( iv_number = `1234567890` iv_problem = `` ).
+    problem( iv_number = ` 10000000146 ` iv_problem = `` ).
+    problem( iv_number = `1234567891` iv_problem = `Tax number (VKN) 123*****91: check digit is wrong` ).
+    problem( iv_number = `12345` iv_problem = `Tax number ***** has 5 digits; VKN has 10, TCKN 11` ).
   ENDMETHOD.
 
 
   METHOD mask.
-    cl_aunit_assert=>assert_equals( act = lcl_tax_id=>mask( '10000000146' ) exp = `100******46` ).
+    DATA lv_masked TYPE string.
+    lv_masked = lcl_tax_id=>mask( '10000000146' ).
+    cl_aunit_assert=>assert_equals( act = lv_masked exp = `100******46` ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -2328,20 +2369,25 @@ CLASS ltc_normalizer DEFINITION FINAL FOR TESTING.
     METHODS email FOR TESTING.
     METHODS address FOR TESTING.
 
-    METHODS words
+    METHODS simple
       IMPORTING
-        iv_words         TYPE string
-      RETURNING
-        value(rt_words) TYPE lif_dupl=>ty_strings.
+        iv_text     TYPE string
+        iv_expected TYPE string.
 
-    METHODS address_of
+    "! Checks the name words; IV_EXPECTED is the words separated by spaces
+    METHODS tokens
       IMPORTING
-        iv_post_code     TYPE string OPTIONAL
-        iv_city          TYPE string OPTIONAL
-        iv_street        TYPE string OPTIONAL
-        iv_house_no      TYPE string OPTIONAL
+        iv_name     TYPE string
+        iv_expected TYPE string.
+
+    METHODS address_key
+      IMPORTING
+        iv_post_code  TYPE string OPTIONAL
+        iv_city       TYPE string OPTIONAL
+        iv_street     TYPE string OPTIONAL
+        iv_house_no   TYPE string OPTIONAL
       RETURNING
-        value(rs_address) TYPE lif_dupl=>ty_address.
+        value(rv_key) TYPE string.
 ENDCLASS.
 
 
@@ -2352,90 +2398,108 @@ CLASS ltc_normalizer IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD words.
-    SPLIT iv_words AT space INTO TABLE rt_words.
+  METHOD simple.
+    DATA lv_text TYPE string.
+    lv_text = mo_cut->simplify( iv_text ).
+    cl_aunit_assert=>assert_equals( act = lv_text exp = iv_expected ).
   ENDMETHOD.
 
 
-  METHOD address_of.
-    rs_address-country = 'TR'.
-    rs_address-post_code = iv_post_code.
-    rs_address-city = iv_city.
-    rs_address-street = iv_street.
-    rs_address-house_no = iv_house_no.
+  METHOD tokens.
+    DATA lt_tokens TYPE lif_dupl=>ty_strings.
+    DATA lv_tokens TYPE string.
+    lt_tokens = mo_cut->name_tokens( iv_name ).
+    CONCATENATE LINES OF lt_tokens INTO lv_tokens SEPARATED BY space.
+    cl_aunit_assert=>assert_equals( act = lv_tokens exp = iv_expected msg = iv_name ).
+  ENDMETHOD.
+
+
+  METHOD address_key.
+    DATA ls_address TYPE lif_dupl=>ty_address.
+    ls_address-country = 'TR'.
+    ls_address-post_code = iv_post_code.
+    ls_address-city = iv_city.
+    ls_address-street = iv_street.
+    ls_address-house_no = iv_house_no.
+    rv_key = mo_cut->address_key( ls_address ).
   ENDMETHOD.
 
 
   METHOD turkish_letters.
-    cl_aunit_assert=>assert_equals( act = mo_cut->simplify( 'İzmir ığdır ÇİĞDEM şükrü Öz' )
-                                    exp = `IZMIR IGDIR CIGDEM SUKRU OZ` ).
+    simple( iv_text = `İzmir ığdır ÇİĞDEM şükrü Öz` iv_expected = `IZMIR IGDIR CIGDEM SUKRU OZ` ).
     " Lower case i must not become a dotted capital in any logon language
-    cl_aunit_assert=>assert_equals( act = mo_cut->simplify( 'existing' ) exp = `EXISTING` ).
+    simple( iv_text = `existing` iv_expected = `EXISTING` ).
   ENDMETHOD.
 
 
   METHOD punctuation.
-    cl_aunit_assert=>assert_equals( act = mo_cut->simplify( `  A.B.C.  Tekstil-San.,Tic. ` )
-                                    exp = `A B C TEKSTIL SAN TIC` ).
+    simple( iv_text = `  A.B.C.  Tekstil-San.,Tic. ` iv_expected = `A B C TEKSTIL SAN TIC` ).
   ENDMETHOD.
 
 
   METHOD legal_forms_removed.
-    DATA lt_exp TYPE lif_dupl=>ty_strings.
-    lt_exp = words( `DERYA TEKSTIL` ).
-    cl_aunit_assert=>assert_equals( act = mo_cut->name_tokens( 'Derya Tekstil San. ve Tic. A.Ş.' ) exp = lt_exp ).
-    cl_aunit_assert=>assert_equals( act = mo_cut->name_tokens( 'DERYA TEKSTİL SANAYİ TİCARET ANONİM ŞİRKETİ' ) exp = lt_exp ).
-    cl_aunit_assert=>assert_equals( act = mo_cut->name_tokens( 'Derya Tekstil Ltd. Şti.' ) exp = lt_exp ).
+    tokens( iv_name = `Derya Tekstil San. ve Tic. A.Ş.` iv_expected = `DERYA TEKSTIL` ).
+    tokens( iv_name = `DERYA TEKSTİL SANAYİ TİCARET ANONİM ŞİRKETİ` iv_expected = `DERYA TEKSTIL` ).
+    tokens( iv_name = `Derya Tekstil Ltd. Şti.` iv_expected = `DERYA TEKSTIL` ).
   ENDMETHOD.
 
 
   METHOD word_order_ignored.
-    cl_aunit_assert=>assert_equals( act = mo_cut->name_tokens( 'Tekstil Derya' )
-                                    exp = mo_cut->name_tokens( 'Derya Tekstil' ) ).
+    tokens( iv_name = `Tekstil Derya` iv_expected = `DERYA TEKSTIL` ).
   ENDMETHOD.
 
 
   METHOD extra_stop_words.
     " Extra words are ignored together with the built-in ones
+    DATA lt_extra TYPE lif_dupl=>ty_strings.
+    APPEND `Holding` TO lt_extra.
     CREATE OBJECT mo_cut
       EXPORTING
-        it_extra_words = words( `Holding` ).
-    cl_aunit_assert=>assert_equals( act = mo_cut->name_tokens( 'Derya Holding Ltd.' )
-                                    exp = words( `DERYA` ) ).
+        it_extra_words = lt_extra.
+    tokens( iv_name = `Derya Holding Ltd.` iv_expected = `DERYA` ).
   ENDMETHOD.
 
 
   METHOD phone.
-    cl_aunit_assert=>assert_equals( act = mo_cut->phone_key( '+90 (212) 555 01 02' ) exp = `2125550102` ).
-    cl_aunit_assert=>assert_equals( act = mo_cut->phone_key( '0212 555 0102' ) exp = `2125550102` ).
-    cl_aunit_assert=>assert_initial( mo_cut->phone_key( '1234' ) ).
+    DATA lv_key TYPE string.
+    lv_key = mo_cut->phone_key( '+90 (212) 555 01 02' ).
+    cl_aunit_assert=>assert_equals( act = lv_key exp = `2125550102` ).
+    lv_key = mo_cut->phone_key( '0212 555 0102' ).
+    cl_aunit_assert=>assert_equals( act = lv_key exp = `2125550102` ).
+    lv_key = mo_cut->phone_key( '1234' ).
+    cl_aunit_assert=>assert_initial( lv_key ).
   ENDMETHOD.
 
 
   METHOD email.
-    cl_aunit_assert=>assert_equals( act = mo_cut->email_key( ` Info@Derya.com.tr ` ) exp = `info@derya.com.tr` ).
-    cl_aunit_assert=>assert_equals( act = mo_cut->email_domain( 'satis@derya.com.tr' ) exp = `derya.com.tr` ).
-    cl_aunit_assert=>assert_initial( mo_cut->email_domain( 'derya.tekstil@gmail.com' ) ).
-    cl_aunit_assert=>assert_initial( mo_cut->email_key( 'no address' ) ).
+    DATA lv_key TYPE string.
+    lv_key = mo_cut->email_key( ` Info@Derya.com.tr ` ).
+    cl_aunit_assert=>assert_equals( act = lv_key exp = `info@derya.com.tr` ).
+    lv_key = mo_cut->email_domain( 'satis@derya.com.tr' ).
+    cl_aunit_assert=>assert_equals( act = lv_key exp = `derya.com.tr` ).
+    lv_key = mo_cut->email_domain( 'derya.tekstil@gmail.com' ).
+    cl_aunit_assert=>assert_initial( lv_key ).
+    lv_key = mo_cut->email_key( 'no address' ).
+    cl_aunit_assert=>assert_initial( lv_key ).
   ENDMETHOD.
 
 
   METHOD address.
     DATA lv_key TYPE string.
+    DATA lv_other TYPE string.
 
-    lv_key = mo_cut->address_key( address_of( iv_post_code = `34000` iv_city = `İstanbul`
-                                              iv_street = `Atatürk Cad.` iv_house_no = `12/3` ) ).
+    lv_key = address_key( iv_post_code = `34000` iv_city = `İstanbul` iv_street = `Atatürk Cad.` iv_house_no = `12/3` ).
     cl_aunit_assert=>assert_equals( act = lv_key exp = `TR/34000/ATATURK CD 12 3` ).
     " Street words written out or abbreviated give the same key
-    cl_aunit_assert=>assert_equals(
-      act = mo_cut->address_key( address_of( iv_post_code = `34000` iv_street = `ATATURK CADDESI No: 12/3` ) )
-      exp = lv_key ).
-    cl_aunit_assert=>assert_equals(
-      act = mo_cut->address_key( address_of( iv_post_code = `06000` iv_street = `Lale Sok.` iv_house_no = `7` ) )
-      exp = mo_cut->address_key( address_of( iv_post_code = `06000` iv_street = `Lale Sokağı` iv_house_no = `7` ) ) ).
-    lv_key = mo_cut->address_key( address_of( iv_city = `İzmir` iv_street = `Kordon` ) ).
+    lv_other = address_key( iv_post_code = `34000` iv_street = `ATATURK CADDESI No: 12/3` ).
+    cl_aunit_assert=>assert_equals( act = lv_other exp = lv_key ).
+    lv_key = address_key( iv_post_code = `06000` iv_street = `Lale Sok.` iv_house_no = `7` ).
+    lv_other = address_key( iv_post_code = `06000` iv_street = `Lale Sokağı` iv_house_no = `7` ).
+    cl_aunit_assert=>assert_equals( act = lv_other exp = lv_key ).
+    lv_key = address_key( iv_city = `İzmir` iv_street = `Kordon` ).
     cl_aunit_assert=>assert_equals( act = lv_key exp = `TR/IZMIR/KORDON` ).
-    cl_aunit_assert=>assert_initial( mo_cut->address_key( address_of( iv_city = `İzmir` ) ) ).
+    lv_key = address_key( iv_city = `İzmir` ).
+    cl_aunit_assert=>assert_initial( lv_key ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -2447,6 +2511,9 @@ CLASS ltc_matcher DEFINITION FINAL FOR TESTING.
   PRIVATE SECTION.
     DATA mo_cut TYPE REF TO lcl_matcher.
     DATA mt_partners TYPE lif_dupl=>ty_partners.
+    DATA ms_result TYPE lif_dupl=>ty_result.
+    DATA ms_line TYPE lif_dupl=>ty_line.
+    DATA mv_lines TYPE i.
 
     METHODS setup.
     METHODS same_tax_number FOR TESTING.
@@ -2473,17 +2540,21 @@ CLASS ltc_matcher DEFINITION FINAL FOR TESTING.
         iv_phone  TYPE string OPTIONAL
         iv_email  TYPE string OPTIONAL.
 
-    METHODS first_line
-      IMPORTING
-        is_result      TYPE lif_dupl=>ty_result
-      RETURNING
-        value(rs_line) TYPE lif_dupl=>ty_line.
+    "! Runs the matcher on MT_PARTNERS; fills MS_RESULT, MS_LINE (first line) and MV_LINES
+    METHODS find.
 
-    METHODS words
+    "! IV_WORDS1 and IV_WORDS2 are words separated by spaces
+    METHODS similarity
       IMPORTING
-        iv_words        TYPE string
-      RETURNING
-        value(rt_words) TYPE lif_dupl=>ty_strings.
+        iv_words1   TYPE string
+        iv_words2   TYPE string
+        iv_expected TYPE i.
+
+    METHODS distance
+      IMPORTING
+        iv_text1    TYPE string
+        iv_text2    TYPE string
+        iv_expected TYPE i.
 ENDCLASS.
 
 
@@ -2526,98 +2597,94 @@ CLASS ltc_matcher IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD first_line.
-    READ TABLE is_result-lines INDEX 1 INTO rs_line.
+  METHOD find.
+    ms_result = mo_cut->find( mt_partners ).
+    mv_lines = lines( ms_result-lines ).
+    CLEAR ms_line.
+    READ TABLE ms_result-lines INDEX 1 INTO ms_line.
   ENDMETHOD.
 
 
-  METHOD words.
-    SPLIT iv_words AT space INTO TABLE rt_words.
+  METHOD similarity.
+    DATA lt_tokens1 TYPE lif_dupl=>ty_strings.
+    DATA lt_tokens2 TYPE lif_dupl=>ty_strings.
+    DATA lv_percent TYPE i.
+
+    IF iv_words1 IS NOT INITIAL.
+      SPLIT iv_words1 AT space INTO TABLE lt_tokens1.
+    ENDIF.
+    IF iv_words2 IS NOT INITIAL.
+      SPLIT iv_words2 AT space INTO TABLE lt_tokens2.
+    ENDIF.
+    lv_percent = mo_cut->similarity( it_tokens1 = lt_tokens1 it_tokens2 = lt_tokens2 ).
+    cl_aunit_assert=>assert_equals( act = lv_percent exp = iv_expected ).
+  ENDMETHOD.
+
+
+  METHOD distance.
+    DATA lv_distance TYPE i.
+    lv_distance = lcl_matcher=>edit_distance( iv_text1 = iv_text1 iv_text2 = iv_text2 ).
+    cl_aunit_assert=>assert_equals( act = lv_distance exp = iv_expected ).
   ENDMETHOD.
 
 
   METHOD same_tax_number.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     partner( iv_id = '1' iv_name = `Derya Tekstil A.Ş.` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Mavi Gıda Ltd.` iv_tax = `1234567890` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = ls_line-score exp = 95 ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons exp = `Same tax number 1234567890` ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 95 ).
+    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same tax number 1234567890` ).
   ENDMETHOD.
 
 
   METHOD tax_number_masked.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     CREATE OBJECT mo_cut.
     partner( iv_id = '1' iv_name = `Ali Veli` iv_tax = `10000000146` ).
     partner( iv_id = '2' iv_name = `Ayşe Kaya` iv_tax = `10000000146` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons exp = `Same tax number 100******46` ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same tax number 100******46` ).
   ENDMETHOD.
 
 
   METHOD spelling_variants.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     partner( iv_id = '1' iv_name = `Derya Tekstil San. ve Tic. A.Ş.` ).
     partner( iv_id = '2' iv_name = `DERYA TEKSTİL SANAYİ TİCARET ANONİM ŞİRKETİ` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = ls_line-score exp = 70 ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons exp = `Same name` ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 70 ).
+    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same name` ).
   ENDMETHOD.
 
 
   METHOD typo_in_name.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     partner( iv_id = '1' iv_name = `Derya Tekstil A.Ş.` ).
     partner( iv_id = '2' iv_name = `Deria Tekstil AŞ` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons exp = `Name 92% similar` ).
-    cl_aunit_assert=>assert_equals( act = ls_line-score exp = 64 ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Name 92% similar` ).
+    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 64 ).
   ENDMETHOD.
 
 
   METHOD different_companies.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-
     partner( iv_id = '1' iv_name = `Derya Tekstil A.Ş.` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Derya Gıda A.Ş.` iv_tax = `9876543217` ).
-    ls_result = mo_cut->find( mt_partners ).
-    cl_aunit_assert=>assert_initial( ls_result-lines ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = mv_lines exp = 0 ).
   ENDMETHOD.
 
 
   METHOD weak_signals_add_up.
     " Address 50 and phone 40: 1 - 0.5 * 0.6 = 70
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     partner( iv_id = '1' iv_name = `Kuzey Lojistik` iv_street = `Atatürk Cad. 12` iv_phone = `0212 555 01 02` ).
     partner( iv_id = '2' iv_name = `Güney Nakliyat` iv_street = `ATATURK CAD 12` iv_phone = `+90 212 5550102` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = ls_line-score exp = 70 ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons exp = `Same address; Same phone` ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 70 ).
+    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same address; Same phone` ).
   ENDMETHOD.
 
 
   METHOD public_mail_domain_ignored.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     CREATE OBJECT mo_cut
       EXPORTING
         iv_threshold = 1.
@@ -2625,19 +2692,17 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '2' iv_name = `Güney Nakliyat` iv_email = `guney@gmail.com` ).
     partner( iv_id = '3' iv_name = `Batı Ticaret` iv_email = `satis@bati.com.tr` ).
     partner( iv_id = '4' iv_name = `Doğu Pazarlama` iv_email = `info@bati.com.tr` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = ls_line-partner1 exp = '3' ).
-    cl_aunit_assert=>assert_equals( act = ls_line-reasons exp = `Same e-mail domain bati.com.tr` ).
-    cl_aunit_assert=>assert_equals( act = ls_line-score exp = 20 ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = mv_lines exp = 1 ).
+    cl_aunit_assert=>assert_equals( act = ms_line-partner1 exp = '3' ).
+    cl_aunit_assert=>assert_equals( act = ms_line-reasons exp = `Same e-mail domain bati.com.tr` ).
+    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 20 ).
   ENDMETHOD.
 
 
   METHOD rule_switched_off.
     DATA lt_rules TYPE lif_dupl=>ty_rule_settings.
     DATA ls_rule TYPE lif_dupl=>ty_rule_setting.
-    DATA ls_result TYPE lif_dupl=>ty_result.
 
     ls_rule-rule = lif_dupl=>rule-tax_id.
     ls_rule-weight = 0.
@@ -2647,14 +2712,14 @@ CLASS ltc_matcher IMPLEMENTATION.
         it_rules = lt_rules.
     partner( iv_id = '1' iv_name = `Derya Tekstil` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Mavi Gıda` iv_tax = `1234567890` ).
-    ls_result = mo_cut->find( mt_partners ).
-    cl_aunit_assert=>assert_initial( ls_result-lines ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = mv_lines exp = 0 ).
   ENDMETHOD.
 
 
   METHOD crowded_block_skipped.
-    DATA ls_result TYPE lif_dupl=>ty_result.
     DATA lv_skipped TYPE string.
+    DATA lv_count TYPE i.
 
     CREATE OBJECT mo_cut
       EXPORTING
@@ -2663,47 +2728,38 @@ CLASS ltc_matcher IMPLEMENTATION.
     partner( iv_id = '1' iv_name = `Alfa` iv_tax = `1234567890` ).
     partner( iv_id = '2' iv_name = `Beta` iv_tax = `1234567890` ).
     partner( iv_id = '3' iv_name = `Gama` iv_tax = `1234567890` ).
-    ls_result = mo_cut->find( mt_partners ).
-    cl_aunit_assert=>assert_initial( ls_result-lines ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-skipped_blocks ) exp = 1 ).
-    READ TABLE ls_result-skipped_blocks INDEX 1 INTO lv_skipped.
+    find( ).
+    cl_aunit_assert=>assert_equals( act = mv_lines exp = 0 ).
+    lv_count = lines( ms_result-skipped_blocks ).
+    cl_aunit_assert=>assert_equals( act = lv_count exp = 1 ).
+    READ TABLE ms_result-skipped_blocks INDEX 1 INTO lv_skipped.
     cl_aunit_assert=>assert_equals( act = lv_skipped exp = `Tax number 1234567890 (3 partners, not compared)` ).
   ENDMETHOD.
 
 
   METHOD pair_order.
-    DATA ls_result TYPE lif_dupl=>ty_result.
-    DATA ls_line TYPE lif_dupl=>ty_line.
-
     partner( iv_id = '9' iv_name = `Zeta` iv_iban = `TR33 0006 1005 1978 6457 8413 26` ).
     partner( iv_id = '4' iv_name = `Eta` iv_iban = `TR330006100519786457841326` ).
-    ls_result = mo_cut->find( mt_partners ).
-    ls_line = first_line( ls_result ).
-    cl_aunit_assert=>assert_equals( act = ls_line-partner1 exp = '4' ).
-    cl_aunit_assert=>assert_equals( act = ls_line-partner2 exp = '9' ).
-    cl_aunit_assert=>assert_equals( act = ls_line-score exp = 90 ).
+    find( ).
+    cl_aunit_assert=>assert_equals( act = ms_line-partner1 exp = '4' ).
+    cl_aunit_assert=>assert_equals( act = ms_line-partner2 exp = '9' ).
+    cl_aunit_assert=>assert_equals( act = ms_line-score exp = 90 ).
   ENDMETHOD.
 
 
   METHOD similarity_values.
-    DATA lt_empty TYPE lif_dupl=>ty_strings.
-
-    cl_aunit_assert=>assert_equals(
-      act = mo_cut->similarity( it_tokens1 = words( `DERYA TEKSTIL` ) it_tokens2 = words( `DERYA TEKSTIL` ) )
-      exp = 100 ).
-    cl_aunit_assert=>assert_initial( mo_cut->similarity( it_tokens1 = words( `DERYA` ) it_tokens2 = lt_empty ) ).
+    similarity( iv_words1 = `DERYA TEKSTIL` iv_words2 = `DERYA TEKSTIL` iv_expected = 100 ).
+    similarity( iv_words1 = `DERYA` iv_words2 = `` iv_expected = 0 ).
     " 7 edits in 13 letters (46) beat one shared word of three (33)
-    cl_aunit_assert=>assert_equals(
-      act = mo_cut->similarity( it_tokens1 = words( `DERYA TEKSTIL` ) it_tokens2 = words( `DERYA GIDA` ) )
-      exp = 46 ).
+    similarity( iv_words1 = `DERYA TEKSTIL` iv_words2 = `DERYA GIDA` iv_expected = 46 ).
   ENDMETHOD.
 
 
   METHOD edit_distance.
-    cl_aunit_assert=>assert_equals( act = lcl_matcher=>edit_distance( iv_text1 = `KITTEN` iv_text2 = `SITTING` ) exp = 3 ).
-    cl_aunit_assert=>assert_equals( act = lcl_matcher=>edit_distance( iv_text1 = `DERYA` iv_text2 = `DERIA` ) exp = 1 ).
-    cl_aunit_assert=>assert_equals( act = lcl_matcher=>edit_distance( iv_text1 = `` iv_text2 = `ABC` ) exp = 3 ).
-    cl_aunit_assert=>assert_equals( act = lcl_matcher=>edit_distance( iv_text1 = `ABC` iv_text2 = `ABC` ) exp = 0 ).
+    distance( iv_text1 = `KITTEN` iv_text2 = `SITTING` iv_expected = 3 ).
+    distance( iv_text1 = `DERYA` iv_text2 = `DERIA` iv_expected = 1 ).
+    distance( iv_text1 = `` iv_text2 = `ABC` iv_expected = 3 ).
+    distance( iv_text1 = `ABC` iv_text2 = `ABC` iv_expected = 0 ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -2725,6 +2781,12 @@ CLASS ltc_finder DEFINITION FINAL FOR TESTING.
     METHODS decisions
       RETURNING
         value(rt_decisions) TYPE lif_dupl=>ty_decisions.
+
+    "! Asserts whether the settings are refused
+    METHODS refused
+      IMPORTING
+        is_settings TYPE lif_dupl=>ty_settings
+        iv_refused  TYPE abap_bool.
 ENDCLASS.
 
 
@@ -2763,14 +2825,30 @@ CLASS ltc_finder IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD refused.
+    DATA lv_problem TYPE string.
+    DATA lv_refused TYPE abap_bool.
+
+    lv_problem = lcl_app=>check_settings( is_settings ).
+    IF lv_problem IS NOT INITIAL.
+      lv_refused = abap_true.
+    ENDIF.
+    cl_aunit_assert=>assert_equals( act = lv_refused exp = iv_refused msg = lv_problem ).
+  ENDMETHOD.
+
+
   METHOD not_duplicate_hidden.
     DATA ls_result TYPE lif_dupl=>ty_result.
+    DATA lt_decisions TYPE lif_dupl=>ty_decisions.
     DATA ls_line TYPE lif_dupl=>ty_line.
+    DATA lv_lines TYPE i.
 
     ls_result = result( ).
-    lcl_finder=>apply_decisions( EXPORTING it_decisions = decisions( ) iv_show_decided = abap_false
+    lt_decisions = decisions( ).
+    lcl_finder=>apply_decisions( EXPORTING it_decisions = lt_decisions iv_show_decided = abap_false
                                  CHANGING  cs_result    = ls_result ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 2 ).
+    lv_lines = lines( ls_result-lines ).
+    cl_aunit_assert=>assert_equals( act = lv_lines exp = 2 ).
     cl_aunit_assert=>assert_equals( act = ls_result-hidden_pairs exp = 1 ).
     READ TABLE ls_result-lines INDEX 1 INTO ls_line.
     cl_aunit_assert=>assert_equals( act = ls_line-decision exp = lif_dupl=>decision-duplicate ).
@@ -2781,12 +2859,16 @@ CLASS ltc_finder IMPLEMENTATION.
 
   METHOD decided_pairs_shown.
     DATA ls_result TYPE lif_dupl=>ty_result.
+    DATA lt_decisions TYPE lif_dupl=>ty_decisions.
     DATA ls_line TYPE lif_dupl=>ty_line.
+    DATA lv_lines TYPE i.
 
     ls_result = result( ).
-    lcl_finder=>apply_decisions( EXPORTING it_decisions = decisions( ) iv_show_decided = abap_true
+    lt_decisions = decisions( ).
+    lcl_finder=>apply_decisions( EXPORTING it_decisions = lt_decisions iv_show_decided = abap_true
                                  CHANGING  cs_result    = ls_result ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 3 ).
+    lv_lines = lines( ls_result-lines ).
+    cl_aunit_assert=>assert_equals( act = lv_lines exp = 3 ).
     READ TABLE ls_result-lines INDEX 2 INTO ls_line.
     cl_aunit_assert=>assert_equals( act = ls_line-decision exp = lif_dupl=>decision-not_duplicate ).
     cl_aunit_assert=>assert_initial( ls_result-hidden_pairs ).
@@ -2798,6 +2880,7 @@ CLASS ltc_finder IMPLEMENTATION.
     DATA ls_line TYPE lif_dupl=>ty_line.
     DATA lt_partners TYPE lif_dupl=>ty_partners.
     DATA ls_partner TYPE lif_dupl=>ty_partner.
+    DATA lv_lines TYPE i.
 
     ls_partner-partner = '1'.
     ls_partner-name = `Ege Mermer`.
@@ -2811,7 +2894,8 @@ CLASS ltc_finder IMPLEMENTATION.
 
     lcl_finder=>add_tax_id_findings( EXPORTING it_partners = lt_partners iv_unmask = abap_false
                                      CHANGING  cs_result   = ls_result ).
-    cl_aunit_assert=>assert_equals( act = lines( ls_result-lines ) exp = 1 ).
+    lv_lines = lines( ls_result-lines ).
+    cl_aunit_assert=>assert_equals( act = lv_lines exp = 1 ).
     READ TABLE ls_result-lines INDEX 1 INTO ls_line.
     cl_aunit_assert=>assert_equals( act = ls_line-finding exp = lif_dupl=>finding-invalid_tax_id ).
     cl_aunit_assert=>assert_equals( act = ls_line-reasons
@@ -2833,16 +2917,16 @@ CLASS ltc_finder IMPLEMENTATION.
     ls_settings-threshold = 60.
     ls_settings-max_block = 200.
     ls_settings-rules = lcl_matcher=>default_rules( ).
-    cl_aunit_assert=>assert_initial( lcl_app=>check_settings( ls_settings ) ).
+    refused( is_settings = ls_settings iv_refused = abap_false ).
     ls_settings-threshold = 0.
-    cl_aunit_assert=>assert_not_initial( lcl_app=>check_settings( ls_settings ) ).
+    refused( is_settings = ls_settings iv_refused = abap_true ).
     ls_settings-threshold = 60.
     READ TABLE ls_settings-rules WITH TABLE KEY rule = lif_dupl=>rule-phone ASSIGNING <ls_rule>.
     <ls_rule>-weight = 101.
-    cl_aunit_assert=>assert_not_initial( lcl_app=>check_settings( ls_settings ) ).
+    refused( is_settings = ls_settings iv_refused = abap_true ).
     ls_settings-rules = lcl_matcher=>default_rules( ).
     CLEAR ls_settings-tax_type.
-    cl_aunit_assert=>assert_not_initial( lcl_app=>check_settings( ls_settings ) ).
+    refused( is_settings = ls_settings iv_refused = abap_true ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -2855,10 +2939,12 @@ INITIALIZATION.
   lcl_text=>set_selection_texts( ).
 
 AT SELECTION-SCREEN.
-  gv_problem = lcl_app=>check_settings( lcl_screen=>settings( ) ).
+  gs_settings = lcl_screen=>settings( ).
+  gv_problem = lcl_app=>check_settings( gs_settings ).
   IF gv_problem IS NOT INITIAL.
     MESSAGE gv_problem TYPE 'E'.
   ENDIF.
 
 START-OF-SELECTION.
-  lcl_app=>run( is_settings = lcl_screen=>settings( ) iv_show_decided = p_decid ).
+  gs_settings = lcl_screen=>settings( ).
+  lcl_app=>run( is_settings = gs_settings iv_show_decided = p_decid ).
