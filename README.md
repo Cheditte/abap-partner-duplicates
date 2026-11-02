@@ -6,7 +6,7 @@ Find business partners that were created twice in SAP, from ABAP alone: same tax
 
 **One program, nothing else.** You paste one source file into SE38 and activate it. No tables, no dictionary objects, no text elements, no abapGit needed.
 
-> **Status: v0.2, not released yet.** It works end to end on an SAP ABAP Platform 2023 trial system with made-up partners (see [What has been verified](#what-has-been-verified)).
+> **Status: v0.3, not released yet.** It works end to end on an SAP ABAP Platform 2023 trial system with made-up partners (see [What has been verified](#what-has-been-verified)).
 
 ## Why
 
@@ -44,7 +44,7 @@ It only reads business partners. Nothing is merged, blocked or deleted: what hap
 
 | What | Why | Who |
 |---|---|---|
-| SAP_BASIS 7.40 SP08 or higher with business partners (S/4HANA, or ECC that uses BP), Unicode | The code uses modern ABAP and reads the BP tables. Tested only on ABAP Platform 2023 so far. | |
+| SAP_BASIS 7.00 or higher (ECC 6.0 and later, S/4HANA) with business partners (BP), Unicode | The code is written in ABAP 7.00 syntax on purpose, so it also runs on older systems, and it reads the BP tables. It has only run on ABAP Platform 2023 so far (see [What has been verified](#what-has-been-verified)). | |
 | A developer key and a transport request (or a local test object) | To create one program. | Basis or a developer |
 | Read access to the BP tables for the user who runs it | The program reads `BUT000`, `BUT100`, `BUT020`, `ADRC`, `ADR2`, `ADR6`, `DFKKBPTAXNUM`, `BUT0BK`. | Basis |
 | **The tax number category your system uses** | In the trial system, `TR2` is "Turkey: Tax number" and `TR1` is "Turkey: Tax Office". Check yours in transaction BUP0 or view `TFKTAXNUMTYPE`. | SAP FI / master data |
@@ -58,7 +58,7 @@ It only reads business partners. Nothing is merged, blocked or deleted: what hap
    - Type: **Executable program**
    - Save. Choose your package and transport request, or **Local Object** for a first test.
 3. **Paste and activate.** Delete the lines the editor generated, paste, and activate (**Ctrl+F3**).
-4. **Check (optional).** Run the unit tests: **Program → Execute → Unit Tests** in SE38, or **Ctrl+Shift+F10** in ADT. 29 tests should pass.
+4. **Check (optional).** Run the unit tests: **Program → Execute → Unit Tests** in SE38, or **Ctrl+Shift+F10** in ADT. 30 tests should pass.
 
 That is all: no tables, no SE11, no SM30, no text elements. The screen texts are set by the program itself (Turkish when you log on in Turkish, English otherwise).
 
@@ -155,7 +155,7 @@ A TCKN is the identity number of a person; sole proprietors use it as their tax 
 - only check digits are calculated, nothing is looked up anywhere;
 - business partners are only read.
 
-There is no own authorization check in v0.2.
+There is no own authorization check in v0.3.
 
 ## Inside the program
 
@@ -178,7 +178,8 @@ The program is one file, organized as local classes, so you can read and change 
 On an SAP ABAP Platform 2023 trial (SAP_BASIS 816), 2 November 2026, with 21 made-up partners:
 
 - The program activates on its own; it uses no dictionary objects or classes of its own.
-- 29 ABAP Unit tests pass: Turkish letters, legal forms, word order, street words, phones, e-mails, VKN/TCKN check digits, masking, scoring, crowded keys, rules switched off, decisions, setting checks.
+- 30 ABAP Unit tests pass: Turkish letters, legal forms, word order, street words, phones, e-mails, VKN/TCKN check digits, masking, edit distance, scoring, crowded keys, rules switched off, decisions, setting checks.
+- [abaplint](https://abaplint.org) 2.120 in 7.00 mode ([abaplint.json](abaplint.json)) finds no syntax that 7.00 lacks. Its one remaining message is that it does not know SAP's standard class `CX_STATIC_CHECK`, because no SAP dictionary is loaded.
 - As a background job, the search found the 5 planted duplicate pairs plus one pair that follows from them (scores 64–99) and the 2 wrong tax numbers, and nothing else.
 - With a "not a duplicate" decision stored, the next run hid that pair (`1 pairs hidden`); with **Show decided pairs** and **Show full tax numbers** it was listed with `N` and full numbers.
 - A lowest score of 0 is refused before the job starts.
@@ -188,7 +189,8 @@ On an SAP ABAP Platform 2023 trial (SAP_BASIS 816), 2 November 2026, with 21 mad
 - **Pasting in SAP GUI.** The program was uploaded through ADT, not pasted in SE38, and the selection screen was not looked at in SAP GUI. The call that sets the screen texts runs without errors.
 - **The click in the list.** Saving a decision (lock and write to `INDX`) was not tried in SAP GUI; reading decisions was tested with data in the same format.
 - **IBAN rule against real data.** The trial has no bank master data, so a bank detail with only an IBAN was refused. The rule is covered by unit tests only.
-- **Other setups:** large data volumes, older releases, the abapGit route.
+- **A real 7.00 system.** The 7.00 syntax was checked with abaplint only; the program has run only on 7.58. Whether every function module and class it uses (`SELECTION_TEXTS_MODIFY`, `ENQUEUE_E_TABLE`, `CL_SALV_TABLE`, `CL_AUNIT_ASSERT`) exists with the same interface on 7.00 was not checked.
+- **Other setups:** large data volumes, the abapGit route.
 - **VKN check-digit algorithm.** It follows the commonly published method; it was not checked against an official test set.
 
 ## License
