@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="550" viewBox="0 0 1280 550" role="img" aria-labelledby="title desc">
+<title id="title">Three preparations. One SAP report.</title><desc id="desc">ABAP Partner Duplicates. Three preparations. One SAP report..</desc>
+<rect x="0" y="0" width="1280" height="550" rx="0" fill="#F5F7FA"/>
+<rect x="0" y="0" width="1280" height="175" rx="0" fill="#142C40"/>
+<rect x="48" y="34" width="28" height="4" rx="2" fill="#087F8C"/>
+<text x="90" y="44" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" fill="#C7D7E2">YOUR FIRST SCAN</text>
+<text x="48" y="100" font-family="Segoe UI, Arial, sans-serif" font-size="38" font-weight="600" fill="#FFFFFF">Three preparations. One SAP report.</text>
+<text x="48" y="143" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#C7D7E2">Complete the setup once; reuse your settings as a variant.</text>
+<rect x="48" y="205" width="370" height="217" rx="16" fill="#FFFFFF" stroke="#D9E3EA"/>
+<rect x="70" y="227" width="44" height="38" rx="10" fill="#E8F5F4"/>
+<text x="85" y="255" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="600" fill="#087F8C">1</text>
+<text x="70" y="305" font-family="Segoe UI, Arial, sans-serif" font-size="27" font-weight="600" fill="#142C40">Install the report</text>
+<text x="70" y="345" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">SE38: upload one file, check</text>
+<text x="70" y="377" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">attributes and activate.</text>
+<rect x="454" y="205" width="370" height="217" rx="16" fill="#FFFFFF" stroke="#D9E3EA"/>
+<rect x="476" y="227" width="44" height="38" rx="10" fill="#E8F5F4"/>
+<text x="491" y="255" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="600" fill="#087F8C">2</text>
+<text x="476" y="305" font-family="Segoe UI, Arial, sans-serif" font-size="27" font-weight="600" fill="#142C40">Assign permissions</text>
+<text x="476" y="345" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">SU21 / PFCG: approve scan</text>
+<text x="476" y="377" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">access and BP authorization</text>
+<text x="476" y="409" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">groups.</text>
+<rect x="860" y="205" width="370" height="217" rx="16" fill="#FFFFFF" stroke="#D9E3EA"/>
+<rect x="882" y="227" width="44" height="38" rx="10" fill="#E8F5F4"/>
+<text x="897" y="255" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="600" fill="#087F8C">3</text>
+<text x="882" y="305" font-family="Segoe UI, Arial, sans-serif" font-size="27" font-weight="600" fill="#142C40">Run a small scan</text>
+<text x="882" y="345" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">Use known BP numbers,</text>
+<text x="882" y="377" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">masked output and the</text>
+<text x="882" y="409" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="400" fill="#53697A">supplied rules.</text>
+<rect x="48" y="452" width="1182" height="54" rx="12" fill="#E8F5F4"/>
+<text x="70" y="487" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="400" fill="#087F8C">First goal: see a small result and understand why each pair was suggested.</text>
+<text x="48" y="533" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#53697A">ABAP PARTNER DUPLICATES</text>
+<text x="1030" y="533" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#53697A">SE38  /  SAP GUI</text>
+</svg>

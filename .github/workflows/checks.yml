@@ -21,3 +21,4 @@ jobs:
       - run: npm run test:gate
       - run: npm run lint
       - run: npm run test:logic
+      - run: npm run check:docs

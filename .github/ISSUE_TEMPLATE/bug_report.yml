@@ -1,0 +1,53 @@
+name: Bug report / Hata bildirimi
+description: Report a reproducible problem using invented or sanitized BP data.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not share real partner names, tax/identity numbers, IBANs, contact details or identifying SAP dumps.
+        Gerçek BP adı, VKN/TCKN, IBAN, iletişim bilgisi veya kişisel veri içeren dump paylaşmayın.
+        For security issues, follow SECURITY.md instead of disclosing details here.
+  - type: input
+    id: revision
+    attributes:
+      label: Source commit / Kaynak revizyonu
+      description: Exact Git commit or source hash; a version label alone is insufficient.
+    validations:
+      required: true
+  - type: input
+    id: sap_release
+    attributes:
+      label: SAP product and SAP_BASIS / SAP ürünü ve SAP_BASIS
+      description: Include support package and Unicode status if known; omit private system identifiers.
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where did it happen? / Hangi adım?
+      options:
+        - Source upload or activation / Yükleme veya aktivasyon
+        - Permissions / Yetkiler
+        - BP selection or validity / BP seçimi veya geçerlilik
+        - Matching or score / Eşleştirme veya puan
+        - ALV or export / ALV veya dışa aktarım
+        - Decision save or lock / Karar kaydı veya kilit
+        - Background job / Arka plan işi
+        - Documentation / Doküman
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and expected result / Adımlar ve beklenen sonuç
+      description: Use invented examples; include filters, weights and masked/full setting.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result and sanitized error / Sonuç ve temizlenmiş hata
+      description: Include the exact message/line; remove identifying information first.
+    validations:
+      required: true

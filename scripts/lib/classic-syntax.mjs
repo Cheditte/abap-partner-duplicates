@@ -19,7 +19,7 @@ export function checkClassicSyntax(source) {
         }
         if (/\bWITH\s+EMPTY\s+KEY\b/iu.test(code)) add("WITH EMPTY KEY is outside the classic 7.00 target");
         if (/&&/u.test(code)) add("String chaining with && is outside the classic 7.00 target");
-        if (/[\w>)]\s*\[/u.test(code)) add("Table expressions are outside the classic 7.00 target");
+        if (/[\w>)]\s*\[(?=\s*[^\s\]])/u.test(code)) add("Table expressions are outside the classic 7.00 target");
         if (statement.findAllExpressionsRecursive(Expressions.StringTemplate).length > 0) {
           add("String templates are outside the classic 7.00 target");
         }

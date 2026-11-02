@@ -13,6 +13,12 @@
    <TPOOL>
     <item>
      <ID>S</ID>
+     <KEY>S_PART</KEY>
+     <ENTRY>Business partners (blank=all)</ENTRY>
+     <LENGTH>37</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
      <KEY>P_KEYDT</KEY>
      <ENTRY>Master-data reference date</ENTRY>
      <LENGTH>34</LENGTH>
@@ -37,8 +43,8 @@
     <item>
      <ID>S</ID>
      <KEY>P_DECID</KEY>
-     <ENTRY>Show decided pairs</ENTRY>
-     <LENGTH>26</LENGTH>
+     <ENTRY>Include not-duplicate pairs</ENTRY>
+     <LENGTH>35</LENGTH>
     </item>
     <item>
      <ID>S</ID>
@@ -79,8 +85,8 @@
     <item>
      <ID>S</ID>
      <KEY>P_UNMASK</KEY>
-     <ENTRY>Show full tax numbers</ENTRY>
-     <LENGTH>29</LENGTH>
+     <ENTRY>Full tax numbers and IBANs</ENTRY>
+     <LENGTH>34</LENGTH>
     </item>
     <item>
      <ID>S</ID>
