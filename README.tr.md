@@ -194,7 +194,7 @@ Program tek bir dosya ve yerel sınıflara bölünmüş; okumak ve değiştirmek
 
 - **Tek başına çalışıyor:** program kendine ait hiçbir sözlük nesnesi ya da sınıf kullanmadan aktifleşiyor.
 - **Birim testleri:** 30 ABAP Unit testi geçiyor. Kapsadıkları: Türkçe harfler, şirket türleri, kelime sırası, sokak kelimeleri, telefon, e-posta, VKN/TCKN kontrol haneleri, maskeleme, düzenleme mesafesi, puanlama, kalabalık anahtarlar, kapatılan kurallar, kararlar, ayar kontrolleri.
-- **7.00 uyumu:** [abaplint](https://abaplint.org) 2.120, 7.00 ayarında ([abaplint.json](abaplint.json)) 7.00'da olmayan hiçbir sözdizimi bulmuyor. Kalan tek mesajı, SAP sözlüğü yüklü olmadığı için SAP'nin standart `CX_STATIC_CHECK` sınıfını tanımaması.
+- **7.00 uyumu:** [abaplint](https://abaplint.org) 2.120, 7.00 ayarında ([abaplint.json](abaplint.json)) hiçbir sorun bildirmiyor. Birkaç standart SAP nesnesini yalnızca [.abaplint-deps](.abaplint-deps) içindeki yer tutucular sayesinde tanıyor. abaplint 7.00'da olmayan her şeyi yakalamıyor (örneğin metot çağrısının doğrudan parametre olarak verilmesi); bu kurallar ayrıca elle kontrol edildi.
 - **Uçtan uca (arka plan job'ı):** bilerek konulan 5 mükerrer çifti, bunlardan doğan bir çifti daha (puan 64–99) ve 2 hatalı vergi numarasını buldu, başka bir şey bulmadı.
 - **Kararlar:** "mükerrer değil" kararı kayıtlıyken sonraki çalıştırma o çifti gizledi (`1 pairs hidden`). **Karar verilmiş çiftleri göster** ve **tam gösterim** işaretliyken çift `N` ile ve numaralar tam olarak listelendi.
 - **Ayar kontrolü:** en düşük puan 0 girilince job başlamadan reddediliyor.

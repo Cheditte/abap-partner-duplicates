@@ -1,0 +1,1 @@
+Stand-ins for a few standard SAP objects (CX_ROOT, CX_STATIC_CHECK, IF_MESSAGE, type pool ICON), so that [abaplint](https://abaplint.org) can check the program in 7.00 mode without an SAP system. They are not installed in SAP.
