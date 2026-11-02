@@ -12,7 +12,7 @@ Her bulgu **neden** bulunduğunu söyler. Karar, carileri tanıyan kişilerindir
 
 **Tek program, başka hiçbir şey yok.** Tek bir kaynak dosyayı SE38'e yapıştırıp aktifleştirirsiniz. Tablo, sözlük (DDIC) nesnesi, metin öğesi ya da abapGit gerekmez.
 
-> **Durum: v0.2, henüz yayınlanmadı.** SAP ABAP Platform 2023 deneme sisteminde, uydurma carilerle baştan sona çalışıyor (bkz. [Neler doğrulandı](#neler-doğrulandı)).
+> **Durum: v0.3, henüz yayınlanmadı.** SAP ABAP Platform 2023 deneme sisteminde, uydurma carilerle baştan sona çalışıyor (bkz. [Neler doğrulandı](#neler-doğrulandı)).
 
 ## Neden
 
@@ -52,7 +52,7 @@ Bu araç:
 
 | Ne | Neden | Kimden |
 |---|---|---|
-| SAP_BASIS 7.40 SP08 ya da üstü, iş ortağı (BP) kullanan Unicode sistem (S/4HANA ya da BP kullanan ECC) | Kod modern ABAP kullanıyor ve BP tablolarını okuyor. Şimdiye kadar yalnızca ABAP Platform 2023'te test edildi. | |
+| SAP_BASIS 7.00 ya da üstü (ECC 6.0 ve sonrası, S/4HANA), iş ortağı (BP) kullanan Unicode sistem | Kod bilerek ABAP 7.00 sözdizimiyle yazıldı, böylece eski sistemlerde de çalışır; BP tablolarını okur. Şimdiye kadar yalnızca ABAP Platform 2023'te çalıştırıldı (bkz. [Neler doğrulandı](#neler-doğrulandı)). | |
 | Geliştirici anahtarı ve transport talebi (ya da deneme için yerel nesne) | Tek bir program oluşturmak için. | Basis ya da bir geliştirici |
 | Programı çalıştıracak kullanıcıya BP tablolarını okuma yetkisi | Program `BUT000`, `BUT100`, `BUT020`, `ADRC`, `ADR2`, `ADR6`, `DFKKBPTAXNUM`, `BUT0BK` tablolarını okur. | Basis |
 | **Sisteminizin kullandığı vergi numarası kategorisi** | Deneme sisteminde `TR2` "Turkey: Tax number", `TR1` "Turkey: Tax Office". Kendi sisteminizde BUP0 işlem kodundan ya da `TFKTAXNUMTYPE` görünümünden bakın. | SAP FI / ana veri ekibi |
@@ -66,7 +66,7 @@ Bu araç:
    - Tür: **Yürütülebilir program** (Executable program)
    - Kaydedin. Paketinizi ve transport talebinizi seçin; ilk deneme için **Yerel nesne** (Local Object) de olur.
 3. **Yapıştırıp aktifleştirin.** Editörün oluşturduğu satırları silin, yapıştırın ve aktifleştirin (**Ctrl+F3**).
-4. **Kontrol (isteğe bağlı).** Birim testlerini çalıştırın: SE38'de **Program → Yürüt → Birim testleri** (Unit Tests), ADT'de **Ctrl+Shift+F10**. 29 testin geçmesi gerekir.
+4. **Kontrol (isteğe bağlı).** Birim testlerini çalıştırın: SE38'de **Program → Yürüt → Birim testleri** (Unit Tests), ADT'de **Ctrl+Shift+F10**. 30 testin geçmesi gerekir.
 
 Bu kadar: tablo yok, SE11 yok, SM30 yok, metin öğesi yok. Ekran metinlerini program kendisi koyar (Türkçe oturumda Türkçe, diğerlerinde İngilizce).
 
@@ -170,7 +170,7 @@ TCKN bir kişinin kimlik numarasıdır; şahıs şirketleri bunu vergi numarası
 - **Dışarıya sorgu yok:** yalnızca kontrol haneleri hesaplanır, hiçbir yerden sorgu yapılmaz.
 - **Yalnızca okuma:** iş ortağı verisi değiştirilmez.
 
-v0.2'de araca özel bir yetki kontrolü yok.
+v0.3'te araca özel bir yetki kontrolü yok.
 
 ## Programın içi
 
@@ -193,7 +193,8 @@ Program tek bir dosya ve yerel sınıflara bölünmüş; okumak ve değiştirmek
 2 Kasım 2026'da, SAP ABAP Platform 2023 deneme sisteminde (SAP_BASIS 816), 21 uydurma cariyle:
 
 - **Tek başına çalışıyor:** program kendine ait hiçbir sözlük nesnesi ya da sınıf kullanmadan aktifleşiyor.
-- **Birim testleri:** 29 ABAP Unit testi geçiyor. Kapsadıkları: Türkçe harfler, şirket türleri, kelime sırası, sokak kelimeleri, telefon, e-posta, VKN/TCKN kontrol haneleri, maskeleme, puanlama, kalabalık anahtarlar, kapatılan kurallar, kararlar, ayar kontrolleri.
+- **Birim testleri:** 30 ABAP Unit testi geçiyor. Kapsadıkları: Türkçe harfler, şirket türleri, kelime sırası, sokak kelimeleri, telefon, e-posta, VKN/TCKN kontrol haneleri, maskeleme, düzenleme mesafesi, puanlama, kalabalık anahtarlar, kapatılan kurallar, kararlar, ayar kontrolleri.
+- **7.00 uyumu:** [abaplint](https://abaplint.org) 2.120, 7.00 ayarında ([abaplint.json](abaplint.json)) 7.00'da olmayan hiçbir sözdizimi bulmuyor. Kalan tek mesajı, SAP sözlüğü yüklü olmadığı için SAP'nin standart `CX_STATIC_CHECK` sınıfını tanımaması.
 - **Uçtan uca (arka plan job'ı):** bilerek konulan 5 mükerrer çifti, bunlardan doğan bir çifti daha (puan 64–99) ve 2 hatalı vergi numarasını buldu, başka bir şey bulmadı.
 - **Kararlar:** "mükerrer değil" kararı kayıtlıyken sonraki çalıştırma o çifti gizledi (`1 pairs hidden`). **Karar verilmiş çiftleri göster** ve **tam gösterim** işaretliyken çift `N` ile ve numaralar tam olarak listelendi.
 - **Ayar kontrolü:** en düşük puan 0 girilince job başlamadan reddediliyor.
@@ -202,7 +203,8 @@ Program tek bir dosya ve yerel sınıflara bölünmüş; okumak ve değiştirmek
 - **SAP GUI'de yapıştırma.** Program ADT üzerinden yüklendi, SE38'e yapıştırılmadı; seçim ekranına SAP GUI'de bakılmadı. Ekran metinlerini koyan çağrı hatasız çalışıyor.
 - **Listedeki tıklama.** Kararın kaydedilmesi (kilit ve `INDX`'e yazma) SAP GUI'de denenmedi; kararların okunması aynı biçimde yazılmış veriyle test edildi.
 - **IBAN kuralının gerçek veriyle çalışması.** Deneme sisteminde banka ana verisi yok; yalnızca IBAN ile banka bilgisi eklenemedi. Kural yalnızca birim testleriyle doğrulandı.
-- **Diğer kurulumlar:** büyük veri hacmi, eski sürümler, abapGit yolu.
+- **Gerçek bir 7.00 sistemi.** 7.00 sözdizimi yalnızca abaplint ile kontrol edildi; program yalnızca 7.58'de çalıştı. Kullandığı fonksiyon ve sınıfların (`SELECTION_TEXTS_MODIFY`, `ENQUEUE_E_TABLE`, `CL_SALV_TABLE`, `CL_AUNIT_ASSERT`) 7.00'da aynı arayüzle var olup olmadığı kontrol edilmedi.
+- **Diğer kurulumlar:** büyük veri hacmi, abapGit yolu.
 - **VKN kontrol hanesi algoritması.** Yaygın olarak yayımlanan yönteme göre yazıldı; resmî bir test setiyle karşılaştırılmadı.
 
 ## Lisans
