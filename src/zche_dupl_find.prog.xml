@@ -12,6 +12,18 @@
    </PROGDIR>
    <TPOOL>
     <item>
+     <ID>S</ID>
+     <KEY>P_KEYDT</KEY>
+     <ENTRY>Master-data reference date</ENTRY>
+     <LENGTH>34</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_TAXCHK</KEY>
+     <ENTRY>Check Turkish VKN/TCKN</ENTRY>
+     <LENGTH>30</LENGTH>
+    </item>
+    <item>
      <ID>R</ID>
      <ENTRY>find likely duplicate business partners</ENTRY>
      <LENGTH>39</LENGTH>

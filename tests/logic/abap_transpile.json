@@ -1,0 +1,11 @@
+{
+  "input_folder": "src",
+  "output_folder": "output",
+  "libs": [{
+    "url": "https://github.com/open-abap/open-abap-core",
+    "ref": "f735eed652288c8ed85b3083a187cc3e7e4a9b97",
+    "files": "/src/**/*"
+  }],
+  "write_unit_tests": true,
+  "options": { "ignoreSyntaxCheck": false, "addCommonJS": true }
+}
