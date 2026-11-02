@@ -15,6 +15,16 @@
   "rules": {
     "parser_error": true,
     "check_syntax": true,
-    "unknown_types": true
+    "unknown_types": true,
+    "begin_end_names": true,
+    "check_ddic": true,
+    "check_include": true,
+    "global_class": true,
+    "implement_methods": true,
+    "method_implemented_twice": true,
+    "superclass_final": true,
+    "xml_consistency": true,
+    "uncaught_exception": true,
+    "select_single_full_key": true
   }
 }
