@@ -37,3 +37,8 @@ test("table expressions are rejected", () => {
 test("empty keys are rejected", () => {
   assert.ok(gate("DATA lt TYPE STANDARD TABLE OF string WITH EMPTY KEY.").some((issue) => issue.message.includes("EMPTY KEY")));
 });
+
+// Empty square brackets copy an internal-table body in classic ABAP.
+test("classic table-body assignments remain allowed", () => {
+  assert.deepEqual(gate("target = source[]. target = source[ ]."), []);
+});

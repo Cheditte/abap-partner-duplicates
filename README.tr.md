@@ -1,113 +1,55 @@
-# abap-partner-duplicates
+# SAP’de olası mükerrer iş ortaklarını bulun
 
 > [English](README.md) | **Türkçe**
 
-Vergi numarası, IBAN, isim, adres, telefon ve e-posta üzerinden olası mükerrer SAP iş ortaklarını bulur. Her adayı bir puan ve gerekçeyle gösterir; kararı ana veri ekibi verir.
+**Tek bir ABAP raporu kurun. Seçtiğiniz iş ortaklarını tarayın. Nedenleri inceleyin.**
 
-**Ön sürüm v0.4.** On-premise/private sistemlerde klasik ABAP içindir; hedef **ABAP 7.00 sözdizimidir**. Değişen revizyon SAP'te aktifleştirilmedi veya çalıştırılmadı. Önceki v0.3 sürümünün Platform 2023 sonuçları bu değişiklikleri doğrulamaz. Gerçek bir 7.00 sistemindeki API ve çalışma zamanı uyumu henüz doğrulanmadı.
+`ZCHE_DUPL_FIND`, SAP’de aynı kişi veya şirket için açılmış olabilecek Business Partner (BP / iş ortağı) kayıtlarını bulmanıza yardımcı olur. İsim, vergi numarası, IBAN, adres, telefon ve e-posta bilgilerini karşılaştırır; aday çiftleri bir puan ve gerekçeyle gösterir.
 
-## Ne yapar?
+![İş ortaklarını seçin, karşılaştırın ve adayları inceleyin](docs/assets/review-flow-tr.svg)
 
-- Seçilen BP ana verisini okur; Türkçe harfleri, şirket/sokak kelimelerini, telefon, e-posta ve IBAN değerlerini normalize eder.
-- Ortak eşleştirme anahtarına sahip adayları karşılaştırır; kural ağırlıklarını 0–100 puanda birleştirir.
-- SAP GUI ALV listesinde olası mükerrerleri gerekçeleriyle gösterir. İş ortaklarını birleştirmez, bloke etmez veya silmez.
-- İstenirse Türk VKN/TCKN kontrol hanesini denetler. Bu seçenek açıkça seçilir ve varsayılan olarak kapalıdır; yabancı vergi numaraları Türk formatıyla değerlendirilmemelidir.
-- Yetkili kullanıcının **Mükerrer / Mükerrer değil** kararını kaydeder. Kararlar `INDX`'e yazılır; BP ana verisi taramada yalnızca okunur.
+**Mükerrer** veya **Mükerrer değil** kararı kaydedebilirsiniz. Kararlar ayrı tutulur; rapor BP ana verisini birleştirmez, bloke etmez veya silmez. Puan, inceleme sırasını belirlemeye yardımcı olur; olasılık veya kesin kimlik kararı değildir.
 
-Puan ayarlanabilir bir sezgisel ölçüdür; **iki kaydın aynı olmasının ölçülmüş olasılığı değildir**. Ortak santral, grup banka hesabı ve adres yanlış adaylar oluşturabilir. Aday oluşturma ve kalabalık anahtarların atlanması bazı mükerrerleri kaçırabilir; boş sonuç bütün verinin temiz olduğunu kanıtlamaz.
+## Başlamak için üç bölüm var
 
-## Gereksinimler
-
-| Konu | Gereksinim |
+| Bölüm | Ne hazırlayacaksınız? |
 |---|---|
-| Sistem | BP tabloları olan Unicode SAP, raporun gerektirdiği BP API’leri. Yalnız müşteri/tedarikçi tablolarını kullanan eski ECC sistemleri için kaynak sınıfı uyarlanmalıdır. |
-| Arayüz | Seçim ve karar tıklamaları için SAP GUI; arka planda spool ve job log'u. |
-| Kurulum | Raporu kuracak ABAP geliştiricisi ve aşağıdaki yetki nesnesini tanımlayıp atayacak yetki yöneticisi. |
-| Veri kapsamı | BP rolü, gruplama, ülke ve vergi kategorileri hedef sistemde doğrulanmalıdır. `TR2` yalnızca verilen örnek kategoridir. |
-| Uyumluluk | Statik 7.00/7.58 kontrolleri SAP API varlığını veya çalışma zamanı uyumunu kanıtlamaz. ABAP Cloud uygulaması değildir. |
+| **1. SAP raporu** | Tek kaynak dosyasını SE38’e yükleyin, program özelliklerini ayarlayıp aktifleştirin. abapGit alternatif bir yoldur. |
+| **2. Yetkiler** | Gerekli yetki nesnesini oluşturun ve izin verilen BP gruplarını atayın. Gerekiyorsa yetki yöneticisiyle ilerleyin. |
+| **3. İlk tarama** | Bildiğiniz birkaç BP numarasını seçin, numaraları maskeli tutun ve kapsamı büyütmeden sonucu inceleyin. |
 
-## Kurulum ve yetkilendirme
+Bütün işlemler SAP içinde yapılır. Dış servis veya SAP sunucusuna ek yazılım kurulumu gerekmez. Kurulumu yapacak kişinin SE38’de program oluşturup aktifleştirebildiği varsayılır.
 
-Çalıştırılabilir kod tek rapordur: `src/zche_dupl_find.prog.abap`. Projeye özel DDIC tablosu gerekmez. **İlk kullanımdan önce yetki kurulumu zorunludur.**
+## Hedefinize göre ilerleyin
 
-1. DEV sisteminde SE38/ADT ile `ZCHE_DUPL_FIND` yürütülebilir programını oluşturup kaynağın tamamını kaydedin. Transport edilebilir paket veya denemede yerel nesne seçin. Alternatif olarak abapGit ile içe aktarın. Programı aktifleştirmeden önce 2. adımdaki yetki nesnesini oluşturun.
-2. Yetki yöneticisi **SU21**'de uygun müşteri nesne sınıfı altında **`ZCHE_DUPL`** nesnesini oluşturur. Standart **`ACTVT`** alanını ve izin verilen **`02`, `03`, `16`** aktivitelerini tanımlar. Nesne normal transport süreciyle taşınır.
-3. **PFCG** rollerinde yalnızca gerekli uygulama aktivitelerini atayın:
-
-   | `ZCHE_DUPL-ACTVT` | Bu uygulamadaki izin |
-   |---|---|
-   | `03` | Tarama çalıştırma |
-   | `16` | Tarama iznine ek olarak vergi numarası ve IBAN'ı maskesiz görme |
-   | `02` | Çift için karar kaydetme |
-
-4. Kullanıcının okuyabileceği BP yetki grupları için **`B_BUPA_GRP`**, aktivite `03`, tanımlayın. Kaynak, tanımlayıcı detayları okumadan önce her BP'nin `BUT000-AUGRP` alanını, boş grup dahil, kontrol eder. Sırf test geçsin diye geniş yetki vermeyin.
-5. Aktivasyon, ATC ve bütün ABAP Unit testlerini çalıştırın. Yaygın kullanımdan önce kısıtlı kullanıcı ve eksik nesne dahil [SAP kabul testlerini](CONTRIBUTING.md#sap-acceptance-checks) tamamlayın.
-
-Nesne veya izin eksikse işlem hata verir. Maskeleme ve seçim varyantı yetkilendirme yerine geçmez. Gerçek `AUTHORITY-CHECK` davranışı ve rol kurulumu hedef SAP sisteminde doğrulanmalıdır.
-
-**Aktivite `03`, ayrıcalıklı toplu okuma iznidir.** İzin verilen `B_BUPA_GRP` grupları içinde tarayıcı adları, iletişim bilgilerini, vergi ve banka tanımlayıcılarını okuyabilir. Standart BP ekranındaki banka, rol veya alan grubu gibi bütün ayrıntılı kısıtları yeniden uygulamaz. Daha dar iş erişimi olan kullanıcılara verilmeden önce bu kapsamı Basis değerlendirmelidir. Aktivite `16`, aynı grup kapsamındaki vergi/IBAN değerlerinin maskesiz gösterimine izin verir.
-
-## İlk tarama
-
-Deneme sisteminde küçük bir veri kümesiyle başlayın; numaralar maskeli kalsın. Ayarlar seçim ekranındadır; tekrar kullanım/job için varyant kaydedebilirsiniz.
-
-| Ayar | Anlamı |
+| Yapmak istediğiniz | Rehber |
 |---|---|
-| BP rolü / gruplama / ülke | İş ortağı seçimini sınırlar; boşsa ilgili filtre uygulanmaz. |
-| Vergi numarası kategorisi | Okunup karşılaştırılacak vergi numarasının kategorisi; sisteminizde doğrulayın. |
-| Anahtar tarih | Geçerli rol, adres, banka ve iletişim kayıtlarının seçildiği tarih; varsayılan güncel tarih. |
-| Türk VKN/TCKN kontrolü | Yalnız Türk numaraları için açıkça seçilen kontrol hanesi denetimi; varsayılan kapalı. |
-| Kural ağırlıkları | `0` kuralı kapatır; `1–100` kuralın katkısını belirtir. |
-| En düşük isim benzerliği | Puanlamaya katılacak isim benzerliği eşiği. |
-| Gösterilecek en düşük puan | Listelenecek çiftin toplam puan eşiği. |
-| Anahtar başına en çok cari | Bu büyüklüğü aşan kalabalık anahtarlar atlanır ve raporlanır. |
-| Yok sayılacak ek kelimeler | Yerleşik şirket/ticaret kelimelerine ek isim kelimeleri. |
-| Numaralar tam görünsün | Aktivite `16` gerekir; aksi durumda numaralar neden ve mesajlarda maskelenir. |
-| Karar verilmiş çiftleri göster | Önceden **Mükerrer değil** kararı verilen çiftleri de listeler. |
+| Kurmak ve ilk taramayı çalıştırmak | [Adım adım kurulum](docs/tr/WALKTHROUGH.md#install) |
+| Seçim ekranındaki alanları anlamak | [Alanlar ne işe yarar?](docs/tr/WALKTHROUGH.md#fields) |
+| Karar kaydetmek veya değiştirmek | [Adayları inceleme](docs/tr/WALKTHROUGH.md#decisions) |
+| Düzenli arka plan taraması yapmak | [Varyant ve job kurulumu](docs/tr/WALKTHROUGH.md#jobs) |
+| Eşleştirme mantığını anlamak veya kodu geliştirmek | [Teknik başvuru](docs/tr/TECHNICAL.md) |
 
-SAP'nin zaman damgalı geçerlilik alanlarında anahtar tarih **00:00:00 UTC** olarak değerlendirilir. Başlangıç/bitiş sınırının boş veya sıfır olması açık uç kabul edilir. Özellikle gün içi değişikliklerde bu yaklaşımı kendi ana veri sürecinizle doğrulayın.
+## Başlamadan önce
 
-Örnek varsayılan ağırlıklar: vergi no `95`, IBAN `90`, isim `70`, adres `50`, telefon/e-posta `40`; isim benzerliği `85`, toplam puan `60`, anahtar büyüklüğü `200`. Kendi sürecinizin etiketli örnekleriyle ayarlayın.
+- **Business Partner** verisi ve raporun kullandığı standart tablo/API’ler bulunan Unicode bir SAP DEV/test sistemi gerekir. Yalnız müşteri/tedarikçi tabloları kullanan eski ECC sistemleri için veri kaynağı uyarlanmalıdır.
+- Raporu yetkili geliştirici kurar. `ZCHE_DUPL` ve izin verilen BP yetki grupları için **SU21/PFCG** yönetim yetkisi gerekir.
+- Etkileşimli kararlar için SAP GUI kullanılır. Ekran etiketleri Türkçe oturumda Türkçe, diğer dillerde İngilizcedir. Bulgu kodları ve bazı teknik açıklamalar İngilizce kalır.
+- Vergi kategorisini kendi sisteminizde doğrulayın. **`TR2` örnek varsayılandır**; her sisteme aynen yazılacak bir değer değildir. Türk numaralarının kontrol hanesi denetimi isteğe bağlıdır ve başlangıçta kapalıdır.
 
-## Sonuçlar ve kararlar
+Tarama, izin verilen BP grupları içindeki kimlik, iletişim ve banka detaylarını okuyabilir. Rol atamadan önce bu kapsamı değerlendirin: [yetkiler ve veri kullanımı](SECURITY.md#turkce). Vergi no ve IBAN maskeli olsa da diğer sonuçlar anonim değildir.
 
-ALV; bulgu türü, puan, iki cari numarası/adı, nedenler ve mevcut kararı gösterir. Karar öncesinde ilgili carileri inceleyin. Vergi numarası ve IBAN varsayılan maskeli olsa da adlar ve diğer açıklamalar iş/kişisel veri içerebilir; erişim ve paylaşımı buna göre yönetin.
+## İlk anlamlı sonuca ulaşın
 
-**Mükerrer** ve **Değil** düğmeleri ana veriyi değiştirmez; karar kaydeder. **Mükerrer değil** çifti, **Karar verilmiş çiftleri göster** seçilmedikçe sonraki taramalarda gizlenir. Kararlar istemci bazında `INDX`, alan `ZC`, ID `ZCHE_DUPL_DECISIONS` altında tutulur; transport edilmez. Kaydetme kilit alır, güncel kararları tekrar okur ve son değişikliğin kullanıcısını/zamanını saklar. Gerçek kilit/kayıt davranışı yerel mantık testlerinin dışındadır; SAP'te doğrulanmalıdır.
+1. [Kaynağı açın](src/zche_dupl_find.prog.abap), **Raw / Download raw file** ile indirin ve SE38’de `ZCHE_DUPL_FIND` yürütülebilir raporuna yükleyin. [Program özellikleri ve yetki adımlarını](docs/tr/WALKTHROUGH.md#install) izleyin.
+2. **İş ortakları** alanına **kendi test sisteminizden en az iki BP numarası** girin. Boş filtreler kapsamı genişletir; önce küçük ve açık bir seçim yapın.
+3. **Vergi no ve IBAN tam görünsün** kapalı kalsın. Vergi kategorisini doğrulayın ve **F8** ile çalıştırın.
+4. İki BP kaydını, puanı ve nedenleri inceleyin. Karar kaydetmek isteğe bağlıdır.
 
-SM36'da `ZCHE_DUPL_FIND` ve varyantıyla job planlanabilir. SM37, job log'u ve spool'u inceleyin. Etkileşimli karar tıklaması ön planda ALV oturumu gerektirir.
+Boş liste, mevcut kurallara ve sınırlara göre aday bulunmadığını gösterir. Yorum yapmadan önce okunan iş ortağı sayısını ve **Karşılaştırılmadı** mesajlarını kontrol edin.
 
-## Eşleştirme ve sınırlar
+## Durum
 
-Kanıtlar şöyle birleştirilir:
+**v0.4.0 geliştirme aşamasında.** Kaynak klasik **ABAP 7.00 sözdizimini** hedefler. Yerel kontroller [VALIDATION.md](VALIDATION.md) dosyasında kayıtlıdır. Güncel revizyon SAP’de aktifleştirilip çalıştırılmadı; API, yetki, SQL seçimi, karar kaydı ve GUI/job davranışı hedef sistemde doğrulanmalıdır. Eski v0.3 sonuçları bu revizyonun doğrulaması değildir. Uygulama klasik ABAP içindir.
 
-`puan = 100 × (1 − (1 − c1/100) × (1 − c2/100) × …)`
-
-İsim kuralında katkı, ağırlık × benzerliktir. Türkçe harfler açık bir dönüşüm tablosuyla işlenir; şirket kelimeleri ve kelime sırası normalize edilir. Vergi/IBAN/iletişim anahtarları ve normalize isim/adresler karşılaştırılır; eksik sokak bilgisi tam adres eşleşmesi sayılmamalıdır.
-
-Kalabalık anahtarlar bütün çiftlere açılmak yerine dışarıda bırakılır. Sonucun kapsamını değerlendirirken atlanan anahtar mesajlarını okuyun. Büyük seçimlerde aday sayısı yine çok büyüyebilir; üretim ölçeğinde ölçüm veya genel performans garantisi yoktur. Küçük seçimlerle başlayıp kendi sisteminizde ölçün.
-
-## Geliştirme kontrolleri
-
-Node.js 22+, npm ve Git yalnız geliştirme içindir; raporun SAP'te çalışması için gerekmez.
-
-```sh
-npm ci --ignore-scripts
-npm run test:gate
-npm run lint
-npm run test:logic
-```
-
-`lint:700` ve `lint:758` hedefleri ayrı çalıştırır. Araç sürümleri sabittir. Depodaki `.abaplint-deps/` dosyaları sınırlı standart nesne yer tutucularıdır; SAP'ye kurulmaz ve bütün DDIC/sınıf/fonksiyon arayüzlerini doğrulayamaz.
-
-Mantık test aracı güncel rapordaki saf metotları ve test sınıflarını çıkarıp JavaScript'e dönüştürür. Gerçek yetki, SQL seçimi, ALV, `INDX`, kilit veya commit çalıştırmaz. JavaScript sayısal davranışı SAP ile eşdeğerlik kanıtı değildir. Ayrıntılar: [tests/logic/README.md](tests/logic/README.md).
-
-`npm run check:classic`, `lint` içinde de çalışan ek proje kontrolüdür. Sabit sürümlü abaplint core ile raporu ayrıştırır; yorumları/metin örneklerini ayırarak inline tanım, constructor ifadesi, şablon, tablo ifadesi, `&&`, boş anahtar ve parametre içinde metot çağrısını reddeder. Diğer sözdizimi sürümlü abaplint kontrolündedir; bu kontrol bütün SAP API’lerinin 7.00'da varlığını kanıtlamaz. `test:gate`, kabul edilen klasik ifadeler ile reddedilecek örnekleri sınar.
-
-## Doğrulama durumu
-
-Değişen kod iki statik hedefte sıfır bulguyla kontrol edildi ve **39 dönüştürülmüş mantık testinin tamamı** geçti. Bunlar SAP ABAP Unit sonucu değildir; gerçek yetki, kaynak SQL'i, karar kaydı veya GUI davranışını doğrulamaz.
-
-v0.3 README'si, 2 Kasım 2026'da ABAP Platform 2023 üzerinde 30 ABAP Unit testinin ve 21 uydurma cariyle arka plan çalışmasının geçtiğini bildirmişti. Bu geçmiş sonuçlar önceki koda aittir. Güncel eşleştirme, yetki ve geçerlilik değişiklikleri için yeni SAP aktivasyonu, ATC, bütün ABAP Unit testleri ve entegrasyon kabulü gerekir.
-
-Gerekli kanıtlar için [CONTRIBUTING.md](CONTRIBUTING.md) dosyasına bakın. MIT lisansı: [LICENSE](LICENSE).
+MIT lisansı. [Katkı rehberi](CONTRIBUTING.md) · [Değişiklikler](CHANGELOG.md) · [Hata bildirimi](https://github.com/Cheditte/abap-partner-duplicates/issues/new?template=bug_report.yml)

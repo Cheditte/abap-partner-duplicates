@@ -2,6 +2,17 @@
 
 ## 0.4.0 — unreleased
 
+### Review and onboarding — 2026-11-03
+
+- Add a BP-number selection range so the first scan can use a few explicit partners. It restricts both sides of the candidate set before detail reads.
+- Reject malformed email keys and refuse a run when every matching/check option is disabled. Add three logic regressions (42 methods total).
+- Keep full ALV explanations instead of truncating them at 255 characters; report SALV creation failure as a background job error.
+- Fit all source lines into 72 columns and extend the classic gate to enforce it. Accept classic empty table-body assignments; add the twelfth gate regression.
+- Replace long landing pages with goal-oriented EN/TR READMEs, four process diagrams, step-by-step EN/TR guides and separate technical references. Document Fixed point arithmetic, permissions, immediate decision saves and dynamic job dates.
+- Add security/data-handling guidance, a validation record, a sanitized bug-report form and CI checks for relative documentation links.
+
+The new BP SQL filter, GUI/long-text behavior and background failure path still require SAP acceptance; no new SAP runtime claim is made.
+
 This revision retains classic ABAP 7.00 syntax; actual 7.00 runtime/API support still requires SAP validation. It has local static and JavaScript-transpiled logic checks; it has not been activated or executed in SAP.
 
 - Keep classic ABAP declarations, CREATE OBJECT, intermediate result variables, classic table/string statements and CL_AUNIT_ASSERT tests. Add an AST/token compatibility gate and 11 gate tests for newer syntax forms that the versioned parser can miss.

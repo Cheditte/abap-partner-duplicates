@@ -13,7 +13,8 @@
     "test:logic": "node scripts/test-logic.mjs",
     "lint:700": "node scripts/lint.mjs 700",
     "check:classic": "node scripts/check-classic.mjs",
-    "test:gate": "node --test tests/classic-syntax.test.mjs"
+    "test:gate": "node --test tests/classic-syntax.test.mjs",
+    "check:docs": "node scripts/check-docs.mjs"
   },
   "devDependencies": {
     "@abaplint/cli": "2.120.92",

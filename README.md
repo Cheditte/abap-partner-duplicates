@@ -1,113 +1,55 @@
-# abap-partner-duplicates
+# Find likely duplicate business partners in SAP
 
 > **English** | [Türkçe](README.tr.md)
 
-Find likely duplicate SAP business partners using tax numbers, IBANs, names, addresses, phones and e-mail addresses. Each candidate has a score and an explanation; the master-data team makes the decision.
+**Install one ABAP report. Scan selected business partners. Review the reasons.**
 
-**Pre-release v0.4.** Classic ABAP for on-premise/private systems, targeting **ABAP 7.00 syntax**. The changed revision has not been activated or executed in SAP. Historical Platform 2023 results from v0.3 do not validate these changes. Actual API and runtime compatibility on a real 7.00 system remains unverified.
+`ZCHE_DUPL_FIND` helps you find SAP Business Partner (BP) records that may refer to the same person or company. It compares names, tax numbers, IBANs, addresses, phone numbers and email addresses, then shows candidate pairs with a score and an explanation.
 
-## What it does
+![Choose a BP scope, compare records and review the candidates](docs/assets/review-flow-en.svg)
 
-- Reads the selected BP master data and normalizes Turkish letters, company words, street words, phone numbers, e-mails and IBANs.
-- Compares candidates sharing a configured matching key, then combines independent rule weights into a score from 0 to 100.
-- Displays likely duplicates and their reasons in an SAP GUI ALV list. It does not merge, block or delete business partners.
-- Optionally checks Turkish VKN/TCKN check digits. This is an explicit option, disabled by default; foreign tax identifiers must not be assessed as Turkish numbers.
-- Lets an authorized reviewer record **Duplicate** or **Not a duplicate**. These decisions are written to `INDX`; scanning BP master data is read-only.
+You can record **Duplicate** or **Not a duplicate**. Decisions are saved separately; the report does not merge, block or delete BP master data. A score helps prioritize review; it is not a probability or a final identity decision.
 
-A score is a configurable heuristic, **not a measured probability** that two partners are identical. Shared switchboards, group bank accounts and common addresses can create false positives. Candidate blocking and crowded-key exclusions can miss duplicates; an empty result does not prove that the database is duplicate-free.
+## Start with these three parts
 
-## Requirements
-
-| Area | Requirement |
+| Part | What you prepare |
 |---|---|
-| Runtime | Unicode SAP system with BP tables and the BP APIs required by the report; older ECC customer/vendor-only systems need a different source implementation. |
-| UI | SAP GUI for selection and ALV decision clicks; background execution produces spool/job-log output. |
-| Setup | An ABAP developer to install the report and an authorization administrator to define and assign the custom authorization object below. |
-| Data scope | Relevant BP roles, groupings, countries and tax categories must be checked in the target system. `TR2` is only the supplied example category. |
-| Compatibility | Static 7.00/7.58 checks do not establish SAP API availability or runtime compatibility. This is not ABAP Cloud code. |
+| **1. SAP report** | Upload one source file in SE38, set program attributes and activate it. abapGit is an alternative. |
+| **2. Permissions** | Create the required authorization object and assign approved BP groups. Work with your authorization administrator if needed. |
+| **3. First scan** | Select a few known BP numbers, keep identifiers masked and inspect the result before expanding the scope. |
 
-## Install and authorize
+Everything runs in SAP. No external service or application-host software is required. Installation assumes you can create and activate a report in SE38.
 
-The executable code is one report, `src/zche_dupl_find.prog.abap`. No project-specific DDIC tables are required. **Authorization setup is required before first use.**
+## Choose your next step
 
-1. In DEV, create executable program `ZCHE_DUPL_FIND` in SE38/ADT and save the complete source in a transportable package, or a local object for a sandbox. Alternatively import it with abapGit. Create the authorization object in step 2 before activating the report.
-2. In **SU21**, an authorization administrator creates customer object **`ZCHE_DUPL`** in a suitable customer authorization class. Add the standard field **`ACTVT`** and maintain permitted activities **`02`, `03`, `16`**. Transport the object through the normal landscape.
-3. In **PFCG**, assign the required application activities to approved roles:
-
-   | `ZCHE_DUPL-ACTVT` | Permission in this application |
-   |---|---|
-   | `03` | Run a scan |
-   | `16` | Display unmasked tax numbers and IBANs, in addition to scan permission |
-   | `02` | Save a pair decision |
-
-4. Maintain **`B_BUPA_GRP`**, activity `03`, for the BP authorization groups the user may read. The source checks each partner's `BUT000-AUGRP`, including blank groups, before reading its identifying details. Do not grant broad access merely to make a test pass.
-5. Run activation, ATC and all package ABAP Unit tests. Complete the [SAP acceptance checks](CONTRIBUTING.md#sap-acceptance-checks), including a restricted user and missing-object test, before wider rollout.
-
-A missing object or missing permission is an error; masking and selection variants are not substitutes for authorization. The real `AUTHORITY-CHECK` behavior and role setup require verification in your SAP system.
-
-**Activity `03` is a privileged aggregate-read grant.** Within the allowed `B_BUPA_GRP` groups, the scanner can read names, contact details, tax identifiers and bank identifiers. It does not reproduce every restriction of the standard BP dialog, such as separate bank, role or field-group permissions. Basis must review that scope before granting it to users with narrower business access. Activity `16` permits raw tax/IBAN display within the same group scope.
-
-## First scan
-
-Start with a limited sandbox data set and keep identifiers masked. Settings are on the selection screen; save them as a variant for reuse or a background job.
-
-| Setting | Meaning |
+| Your goal | Guide |
 |---|---|
-| BP role / grouping / country | Limit the selected business partners; blank means no restriction for that filter. |
-| Tax number category | The category used to retrieve and compare tax identifiers; confirm the value in your system. |
-| Key date | Date used to select valid roles, addresses, bank and communication records; defaults to the current date. |
-| Check Turkish VKN/TCKN | Explicit checksum validation for Turkish identifiers only; off by default. |
-| Rule weights | `0` disables a rule; other values express its contribution from `1` to `100`. |
-| Minimum name similarity | Lowest name similarity that contributes evidence. |
-| Lowest score shown | Minimum combined score to display a pair. |
-| Maximum partners per key | Crowded matching keys above this size are skipped and reported. |
-| Extra words to ignore | Additional name words ignored alongside the supplied company/trade words. |
-| Show full identifiers | Requires activity `16`; identifiers otherwise remain masked in reasons and messages. |
-| Show decided pairs | Includes pairs previously marked **Not a duplicate**. |
+| Install and run the first scan | [Step-by-step walkthrough](docs/WALKTHROUGH.md#install) |
+| Understand every selection field | [Selection screen explained](docs/WALKTHROUGH.md#fields) |
+| Record or reverse a decision | [Review candidates](docs/WALKTHROUGH.md#decisions) |
+| Run regular background scans | [Variant and job setup](docs/WALKTHROUGH.md#jobs) |
+| Understand matching or extend the code | [Technical reference](docs/TECHNICAL.md) |
 
-The key date is evaluated as **00:00:00 UTC** where SAP stores timestamp validity. Initial/zero boundaries are treated as open-ended. Confirm that convention against your master-data maintenance process, especially intraday changes.
+## Before you start
 
-Defaults are example weights: tax number `95`, IBAN `90`, name `70`, address `50`, phone/e-mail `40`, minimum name similarity `85`, minimum score `60`, maximum key size `200`. Tune them with labelled examples from your own process.
+- Use a Unicode SAP DEV/test system with **Business Partner** data and the standard tables/APIs used by the report. Customer/vendor-only ECC systems need a different source implementation.
+- An authorized developer installs the report; **SU21/PFCG** administration is required for `ZCHE_DUPL` and the allowed BP authorization groups.
+- Use SAP GUI for interactive decisions. Screen labels follow your logon language: Turkish for Turkish logons, English otherwise. Finding codes and some diagnostic reasons remain English.
+- Confirm the tax category in your system. **`TR2` is an example default**, not a universal setting. Turkish checksum checks are optional and off by default.
 
-## Results and decisions
+The scan reads identifying, contact and bank data within the granted BP group scope. Review that access before assigning it; see [permissions and data handling](SECURITY.md). Masking tax numbers and IBANs does not make the remaining output anonymous.
 
-ALV shows finding type, score, both partner numbers/names, reasons and the current decision. Inspect the underlying partners before deciding. Tax numbers and IBANs are masked by default; names and other explanatory details remain business/personal data and must be handled accordingly.
+## First useful result
 
-**Duplicate** and **Not dup.** are decision actions, not master-data changes. A **Not a duplicate** decision hides that pair in later scans unless **Show decided pairs** is selected. Decisions are stored per client in `INDX`, area `ZC`, ID `ZCHE_DUPL_DECISIONS`; they are not transported. Saving takes a lock, rereads the current decisions and records the user/time of the last change. Validate the actual lock/save behavior in SAP; it is outside the local logic suite.
+1. [Open the source](src/zche_dupl_find.prog.abap), choose **Raw / Download raw file**, and upload it into executable report `ZCHE_DUPL_FIND` in SE38. Follow the [program-attribute and permission steps](docs/WALKTHROUGH.md#install).
+2. Enter **two or more BP numbers from your own test system** in **Business partners**. Empty filters broaden the scan; start with an explicit small selection.
+3. Keep **Full tax numbers and IBANs** unchecked, confirm the tax category, and execute with **F8**.
+4. Review both BP records, the score and the reasons. Recording a decision is optional.
 
-Schedule `ZCHE_DUPL_FIND` with a variant in SM36 if background output is needed. Check SM37, the job log and spool. Interactive decision clicks need a foreground ALV session.
+A blank result means no candidates met the current rules and limits. Check the partner count and **Not compared** messages before drawing conclusions.
 
-## Matching and limits
+## Status
 
-The score combines evidence as:
+**v0.4.0 is in development.** The source targets classic **ABAP 7.00 syntax**. Local checks are recorded in [VALIDATION.md](VALIDATION.md). The current revision has not been activated or executed in SAP; API availability, permissions, SQL selection, decisions and GUI/job behavior need target-system acceptance. Historical v0.3 results do not validate this revision. This is classic ABAP, not an ABAP Cloud application.
 
-`score = 100 × (1 − (1 − c1/100) × (1 − c2/100) × …)`
-
-For name matching, evidence is the configured weight multiplied by similarity. Normalization folds Turkish letters explicitly and ignores configured company words/word order. Matching compares exact tax/IBAN/contact keys and normalized names/addresses; incomplete address information must not establish a full-address match.
-
-Crowded keys are excluded rather than expanded into every possible pair. Review the skipped-key messages when assessing completeness. Candidate count can still grow substantially for large selections; there is no production-scale benchmark or universal performance guarantee. Start narrow and measure in your own system.
-
-## Development checks
-
-Node.js 22+, npm and Git are development tools only; they are not needed to execute the report in SAP.
-
-```sh
-npm ci --ignore-scripts
-npm run test:gate
-npm run lint
-npm run test:logic
-```
-
-`lint:700` and `lint:758` run the static targets separately. Tool versions are pinned. The committed `.abaplint-deps/` files are limited standard-object stand-ins, not installable SAP source; they cannot validate every DDIC/class/function interface.
-
-The logic harness extracts pure methods and existing test classes from the current report, then transpiles them to JavaScript. It does not exercise real authorization, SQL selection, ALV, `INDX`, locks or commits. JavaScript numeric behavior does not establish SAP runtime parity. See [tests/logic/README.md](tests/logic/README.md) for extraction and evidence details.
-
-`npm run check:classic` is an extra project gate, also run by `lint`. It parses the report with pinned abaplint core, ignores comments/quoted examples, and rejects inline declarations, constructor expressions, templates, table expressions, `&&`, empty keys and method calls nested in actual arguments. Versioned abaplint still checks the rest of the syntax; the gate does not certify SAP API availability on 7.00. `test:gate` tests accepted classic statements and rejected examples.
-
-## Verification status
-
-Local checks for the changed code passed both static targets with zero findings and completed all **39 transpiled logic tests**. These are not SAP ABAP Unit results and do not validate authorization, source SQL, decision persistence or GUI behavior.
-
-The v0.3 README reported 30 passing SAP ABAP Unit tests and a background run with 21 invented partners on ABAP Platform 2023, on 2 November 2026. Those historical results belong to the earlier code. Current matching, authorization and validity changes require fresh SAP activation, ATC, complete ABAP Unit and integration acceptance.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for required evidence and [CHANGELOG.md](CHANGELOG.md) for migration notes. MIT licensed; see [LICENSE](LICENSE).
+MIT licensed. [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/Cheditte/abap-partner-duplicates/issues/new?template=bug_report.yml)
